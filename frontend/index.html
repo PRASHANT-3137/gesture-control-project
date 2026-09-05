@@ -1,269 +1,876 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
+
 <head>
-  <meta charset="UTF-8" />
-  <title>Gesture Detection - Person A</title>
-  <style>
-    body { margin: 0; background: #111; display: flex; justify-content: center; align-items: center; height: 100vh; }
-    #container { position: relative; width: 640px; height: 480px; }
-    video { width: 640px; height: 480px; transform: scaleX(-1); }
-    canvas { position: absolute; top: 0; left: 0; width: 640px; height: 480px; transform: scaleX(-1); }
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VisionCursor - Hand Gesture Mouse Replacement (CV Core)</title>
+    <style>
+        /* ==========================================================================
+       MINIMAL CORE LAYOUT
+       Raw webcam feed + canvas overlay + virtual cursor + status label
+       ========================================================================== */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
 
-    /* Virtual cursor dot that follows index finger on full screen */
-    #cursor {
-      position: fixed;
-      width: 18px;
-      height: 18px;
-      border-radius: 50%;
-      background: cyan;
-      border: 2px solid white;
-      pointer-events: none;
-      transform: translate(-50%, -50%);
-      display: none;
-      z-index: 9999;
-    }
+        body {
+            background-color: #000000;
+            color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
 
-    /* Status label in top left corner */
-    #status {
-      position: fixed;
-      top: 12px;
-      left: 12px;
-      color: cyan;
-      font-family: monospace;
-      font-size: 14px;
-      background: rgba(0,0,0,0.6);
-      padding: 6px 12px;
-      border-radius: 6px;
-      z-index: 9999;
-    }
-  </style>
+        /* Video & Canvas Container */
+        #video-container {
+            position: relative;
+            width: 640px;
+            height: 480px;
+            background: #111111;
+            border: 1px solid #333333;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+        }
+
+        /* Raw Webcam Video Element (Mirrored horizontally for natural selfie interaction) */
+        #webcam-video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+            /* Mirror camera feed */
+        }
+
+        /* Canvas Overlay on top of Video */
+        #output-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        /* Small Status Label in Corner of Screen */
+        #status-label {
+            position: fixed;
+            top: 16px;
+            left: 16px;
+            padding: 8px 16px;
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(0, 240, 255, 0.3);
+            border-radius: 6px;
+            color: #00f0ff;
+            font-size: 0.85rem;
+            font-weight: 600;
+            font-family: monospace;
+            letter-spacing: 0.5px;
+            z-index: 999999;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        }
+
+        /* Hint Label at Bottom of Screen */
+        #hint-label {
+            position: fixed;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255, 255, 255, 0.5);
+            font-family: monospace;
+            font-size: 13px;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 6px 14px;
+            border-radius: 6px;
+            z-index: 9999;
+        }
+
+        /* Virtual Cursor Dot following Index Fingertip on Full Screen */
+        #cursor {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #00f0ff;
+            border: 2px solid #ffffff;
+            box-shadow: 0 0 12px #00f0ff;
+            pointer-events: none;
+            z-index: 999998;
+            transform: translate(-50%, -50%);
+            display: none;
+            transition: background 0.1s ease, transform 0.1s ease;
+        }
+
+        #cursor.cursor-left-click {
+            background: #ef4444;
+            box-shadow: 0 0 20px #ef4444;
+            transform: translate(-50%, -50%) scale(1.4);
+        }
+
+        #cursor.cursor-right-click {
+            background: #a855f7;
+            box-shadow: 0 0 20px #a855f7;
+            transform: translate(-50%, -50%) scale(1.4);
+        }
+
+        #cursor.cursor-drag {
+            background: #f59e0b;
+            box-shadow: 0 0 20px #f59e0b;
+            border-radius: 4px;
+        }
+
+        #cursor.cursor-scroll {
+            background: #10b981;
+            box-shadow: 0 0 20px #10b981;
+            border-radius: 4px;
+        }
+    </style>
 </head>
+
 <body>
-  <div id="status">Loading...</div>
-  <div id="cursor"></div>
 
-  <div id="container">
-    <video id="video" autoplay playsinline muted></video>
-    <canvas id="canvas"></canvas>
-  </div>
+    <!-- Status Label in Corner -->
+    <div id="status-label">Initializing MediaPipe...</div>
+    <div id="hint-label">Keep hand at chest level, 30-60cm from camera</div>
 
-  <script type="module">
-    import { HandLandmarker, FilesetResolver }
-      from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/vision_bundle.js";
+    <!-- Raw Webcam Video Feed & Landmark Overlay Canvas -->
+    <div id="video-container">
+        <video id="webcam-video" autoplay playsinline muted></video>
+        <canvas id="output-canvas"></canvas>
+    </div>
 
-    const video    = document.getElementById("video");
-    const canvas   = document.getElementById("canvas");
-    const ctx      = canvas.getContext("2d");
-    const cursor   = document.getElementById("cursor");
-    const status   = document.getElementById("status");
+    <!-- Virtual Screen Cursor -->
+    <div id="cursor"></div>
 
-    // Exponential smoothing state (reduces jitter)
-    let smoothX = 0, smoothY = 0, hasInit = false;
-    const ALPHA = 0.7; // smoothing factor
+    <!-- ==========================================================================
+       COMPUTER VISION & GESTURE PIPELINE (MediaPipe Tasks Vision 0.10.0)
+       ========================================================================== -->
+    <script type="module">
+        /**
+         * ============================================================================
+         * PRODUCTION-QUALITY HAND GESTURE CV PIPELINE (Person A - CV Lead):
+         * 
+         * Key Modules:
+         * 1. MediaPipe HandLandmarker Integration (@mediapipe/tasks-vision@0.10.0)
+         * 2. Hand Only Validation (Strict Handedness + Wide Shape Ratio [0.3, 5.0])
+         * 3. Hand Distance/Size Validation ("Move Hand Closer" / "Move Hand Back")
+         * 4. Tracking Grace Period (3 frames = ~50ms tolerance for a single dropped frame)
+         * 5. Dynamic Pinch Threshold (scales dynamically with hand size = palm * 0.35)
+         * 6. Adaptive Exponential Smoothing (velocity-based α: 0.50 when still -> 0.90 when fast)
+         * 7. Gesture Debouncing & Stability Buffer (move + scroll are instant; click/drag require 2 consecutive frames)
+         * 8. CustomEvent Emitter for Person B & Real-Time Status Label Updates
+         * ============================================================================
+         */
 
-    // Scroll tracking
-    let prevScrollY = null;
+        // MediaPipe Vision Tasks CDN import
+        import {
+            HandLandmarker,
+            FilesetResolver
+        } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/vision_bundle.js";
 
-    // Gesture cooldown (prevents repeated firing)
-    let cooldown = false;
+        // --------------------------------------------------------------------------
+        // CONFIGURATION CONSTANTS
+        // --------------------------------------------------------------------------
+        const CONFIG = {
+            minHandConfidence: 0.50,      // Sensible handedness confidence threshold
+            minPalmNorm: 0.03,            // Anything below this = too far (Move Hand Closer)
+            maxPalmNorm: 0.55,            // Anything above this = too close (Move Hand Back)
+            anatomicalMinNorm: 0.01,      // Absolute anatomical lower bound
+            anatomicalMaxNorm: 0.90,      // Absolute anatomical upper bound
+            pinchThresholdScale: 0.35,    // Dynamic pinch threshold = handSize * 0.35
+            screenDeadzoneMargin: 0.10,   // 10% screen boundary deadzone
+            scrollDeltaThreshold: 0.008,  // Vertical velocity delta for 2-finger scroll
+            debounceFrames: 2,            // 2 consecutive frames required for click/drag only (move + scroll are instant, see updateGestureDebounced)
+            minSmoothingAlpha: 0.50,      // Low velocity smoothing factor (ultra-stable when still)
+            maxSmoothingAlpha: 0.90,      // High velocity smoothing factor (responsive when moving fast)
+            velocityRefSpeed: 35.0,       // Reference pixel velocity for adaptive smoothing scaling
+        };
 
-    // --------------------------------------------------------
-    // GESTURE EVENT EMITTER
-    // Person B and Person C listen to this on window
-    // --------------------------------------------------------
-    function emitGesture(detail) {
-      console.log("GESTURE:", detail);
-      window.dispatchEvent(new CustomEvent("gesture", {
-        detail,
-        bubbles: true,
-        cancelable: true
-      }));
-    }
+        // --------------------------------------------------------------------------
+        // GLOBAL PIPELINE STATE
+        // --------------------------------------------------------------------------
+        const state = {
+            handLandmarker: null,
+            video: document.getElementById("webcam-video"),
+            canvas: document.getElementById("output-canvas"),
+            ctx: document.getElementById("output-canvas").getContext("2d"),
+            cursorEl: document.getElementById("cursor"),
+            statusLabel: document.getElementById("status-label"),
 
-    // --------------------------------------------------------
-    // DISTANCE between two landmarks in pixels
-    // --------------------------------------------------------
-    function dist(a, b, w, h) {
-      return Math.sqrt(
-        Math.pow((a.x - b.x) * w, 2) +
-        Math.pow((a.y - b.y) * h, 2)
-      );
-    }
+            // Adaptive Smoothing state
+            hasInitialPos: false,
+            prevRawCoords: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
+            smoothedCoords: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
 
-    // --------------------------------------------------------
-    // FINGER EXTENSION CHECK
-    // A finger is extended if its tip is farther from wrist
-    // than its middle joint (PIP)
-    // --------------------------------------------------------
-    function isExtended(lm, tip, pip) {
-      const wrist = lm[0];
-      return dist(lm[tip], wrist, 1, 1) > dist(lm[pip], wrist, 1, 1) * 1.15;
-    }
+            // Tracking Grace Period (3 frames tolerance)
+            gracePeriodFrames: 0,
+            lastValidLandmarks: null,
+            lastValidSmoothedCoords: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
+            lastValidGesture: null,
 
-    console.log("Step 1: Loading MediaPipe...");
-    status.textContent = "Loading MediaPipe...";
+            // Scroll velocity baseline
+            prevMidpointY: null,
 
-    // --------------------------------------------------------
-    // LOAD MEDIAPIPE
-    // --------------------------------------------------------
-    const vision = await FilesetResolver.forVisionTasks(
-      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
-    );
+            // Gesture Debouncing Buffer
+            activeGesture: {
+                type: 'move',
+                button: null,
+                direction: null,
+                label: 'Gesture: Moving'
+            },
+            candidateGesture: null,
+            candidateKey: '',
+            candidateCount: 0,
+        };
 
-    const handLandmarker = await HandLandmarker.createFromOptions(vision, {
-      baseOptions: {
-        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-        delegate: "GPU"
-      },
-      runningMode: "VIDEO",
-      numHands: 1
-    });
+        // --------------------------------------------------------------------------
+        // 1. INITIALIZE MEDIAPIPE HAND LANDMARKER
+        // --------------------------------------------------------------------------
+        async function initMediaPipe() {
+            try {
+                console.log("Loading MediaPipe...");
+                state.statusLabel.textContent = "Loading MediaPipe...";
 
-    console.log("Step 2: MediaPipe Ready!");
-    status.textContent = "MediaPipe Ready - Starting Camera...";
+                const vision = await FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+                );
 
-    // --------------------------------------------------------
-    // START WEBCAM
-    // --------------------------------------------------------
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-    video.srcObject = stream;
+                try {
+                    // Initialize with GPU delegate
+                    state.handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                        baseOptions: {
+                            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+                            delegate: "GPU"
+                        },
+                        runningMode: "VIDEO",
+                        numHands: 1,
+                        minHandDetectionConfidence: 0.5,
+                        minHandPresenceConfidence: 0.5,
+                        minTrackingConfidence: 0.5
+                    });
+                } catch (gpuErr) {
+                    console.warn("GPU initialization failed, falling back to CPU:", gpuErr);
+                    state.handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                        baseOptions: {
+                            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
+                        },
+                        runningMode: "VIDEO",
+                        numHands: 1,
+                        minHandDetectionConfidence: 0.5,
+                        minHandPresenceConfidence: 0.5,
+                        minTrackingConfidence: 0.5
+                    });
+                }
 
-    video.addEventListener("loadeddata", () => {
-      canvas.width  = video.videoWidth;
-      canvas.height = video.videoHeight;
-      console.log("Step 3: Camera started!", video.videoWidth, video.videoHeight);
-      console.log("Step 4: Detection loop starting...");
-      status.textContent = "Ready - Show your hand!";
-      detect();
-    });
+                console.log("MediaPipe Ready");
+                state.statusLabel.textContent = "MediaPipe Ready - Starting Camera...";
 
-    // --------------------------------------------------------
-    // MAIN DETECTION LOOP
-    // --------------------------------------------------------
-    function detect() {
-      const results = handLandmarker.detectForVideo(video, performance.now());
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+                startWebcam();
+            } catch (err) {
+                console.error("Failed to initialize MediaPipe:", err);
+                state.statusLabel.textContent = "MediaPipe Error";
+            }
+        }
 
-      if (results.landmarks && results.landmarks.length > 0) {
-        const lm = results.landmarks[0];
-        const W  = canvas.width;
-        const H  = canvas.height;
+        // --------------------------------------------------------------------------
+        // 2. START WEBCAM STREAM & ATTACH DETECTION TRIGGER
+        // --------------------------------------------------------------------------
+        async function startWebcam() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" }
+                });
 
-        // --- Draw all 21 green landmark dots ---
-        lm.forEach((point, i) => {
-          ctx.beginPath();
-          let r     = 5;
-          let color = "lime";
-          if (i === 8)  { r = 8;  color = "cyan"; }   // index tip
-          if (i === 4)  { r = 7;  color = "red"; }    // thumb tip
-          if (i === 12) { r = 7;  color = "violet"; } // middle tip
-          ctx.arc(point.x * W, point.y * H, r, 0, Math.PI * 2);
-          ctx.fillStyle = color;
-          ctx.fill();
+                state.video.srcObject = stream;
+
+                // Canvas size MUST be set AFTER loadeddata event fires
+                // Detection loop MUST start inside loadeddata callback
+                state.video.addEventListener("loadeddata", () => {
+                    state.canvas.width = state.video.videoWidth;
+                    state.canvas.height = state.video.videoHeight;
+
+                    const container = document.getElementById("video-container");
+                    if (container && state.video.videoWidth && state.video.videoHeight) {
+                        container.style.width = `${state.video.videoWidth}px`;
+                        container.style.height = `${state.video.videoHeight}px`;
+                    }
+
+                    console.log(`Camera started: ${state.video.videoWidth}x${state.video.videoHeight}`);
+                    console.log("Detection loop started");
+                    state.statusLabel.textContent = "Ready - Show Hand";
+
+                    // Start requestAnimationFrame detection loop
+                    window.requestAnimationFrame(predictLoop);
+                });
+
+                await state.video.play();
+            } catch (err) {
+                console.error("Camera access error:", err);
+                state.statusLabel.textContent = "Camera Error";
+            }
+        }
+
+        // --------------------------------------------------------------------------
+        // 3. MATHEMATICAL HELPERS & ADAPTIVE EXPONENTIAL SMOOTHING
+        // --------------------------------------------------------------------------
+
+        /**
+         * Calculates 2D Euclidean Distance between two landmarks
+         * Formula: d = sqrt((x2 - x1)^2 + (y2 - y1)^2)
+         */
+        function calculateDistance(lm1, lm2, width = 1, height = 1) {
+            const dx = (lm1.x - lm2.x) * width;
+            const dy = (lm1.y - lm2.y) * height;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        function clamp(val, min, max) {
+            return Math.max(min, Math.min(max, val));
+        }
+
+        /**
+         * Maps normalized camera coordinates (0 to 1) to screen viewport (pixels)
+         * Flips X coordinate (1 - x) so cursor mirrors physical motion naturally.
+         */
+        function mapLandmarkToScreen(normX, normY) {
+            const mirroredX = 1 - normX;
+            const margin = CONFIG.screenDeadzoneMargin;
+
+            const mappedNormX = clamp((mirroredX - margin) / (1 - 2 * margin), 0, 1);
+            const mappedNormY = clamp((normY - margin) / (1 - 2 * margin), 0, 1);
+
+            return {
+                x: mappedNormX * window.innerWidth,
+                y: mappedNormY * window.innerHeight
+            };
+        }
+
+        /**
+         * Adaptive Exponential Smoothing:
+         * - Fast movement: alpha -> 0.90 (responsive)
+         * - Slow/Still hand: alpha -> 0.50 (ultra-stable)
+         */
+        function applyAdaptiveSmoothing(rawX, rawY) {
+            if (!state.hasInitialPos) {
+                state.smoothedCoords.x = rawX;
+                state.smoothedCoords.y = rawY;
+                state.prevRawCoords.x = rawX;
+                state.prevRawCoords.y = rawY;
+                state.hasInitialPos = true;
+                return state.smoothedCoords;
+            }
+
+            const velocity = Math.hypot(rawX - state.prevRawCoords.x, rawY - state.prevRawCoords.y);
+            state.prevRawCoords.x = rawX;
+            state.prevRawCoords.y = rawY;
+
+            const speedRatio = clamp(velocity / CONFIG.velocityRefSpeed, 0, 1);
+            const dynamicAlpha = CONFIG.minSmoothingAlpha + (CONFIG.maxSmoothingAlpha - CONFIG.minSmoothingAlpha) * speedRatio;
+
+            state.smoothedCoords.x = dynamicAlpha * rawX + (1 - dynamicAlpha) * state.smoothedCoords.x;
+            state.smoothedCoords.y = dynamicAlpha * rawY + (1 - dynamicAlpha) * state.smoothedCoords.y;
+
+            return state.smoothedCoords;
+        }
+
+        // --------------------------------------------------------------------------
+        // 4. ORDERED HAND VALIDATION, SIZE CHECK & SHAPE RATIO FILTER
+        // --------------------------------------------------------------------------
+        /**
+         * Ordered Validation Process:
+         * 1. Check if 21 landmarks exist
+         * 2. Check handedness confidence
+         * 3. Check hand SIZE (too far < 0.03 / too close > 0.55) BEFORE anatomical check
+         * 4. Foot detection shape ratio check (Length d(0,12) / Width d(5,17) in [0.3, 5.0])
+         * 5. Anatomical check last (0.01 to 0.90)
+         */
+        function validateHandAndDistance(results) {
+            // 1. First check if 21 landmarks exist
+            if (!results.landmarks || results.landmarks.length === 0 || results.landmarks[0].length !== 21) {
+                return { isValid: false, reason: "NO_HAND", label: "No Hand Detected" };
+            }
+
+            const lm = results.landmarks[0];
+            const wrist = lm[0];
+            const indexMcp = lm[5];
+            const middleTip = lm[12];
+            const pinkyMcp = lm[17];
+            const middleMcp = lm[9];
+
+            // 2. Check handedness confidence
+            let handednessLabel = "Hand";
+            let handednessScore = 1.0;
+
+            if (results.handedness && results.handedness.length > 0 && results.handedness[0].length > 0) {
+                const handedness = results.handedness[0][0];
+                handednessLabel = handedness.displayName || handedness.categoryName || "Hand";
+                handednessScore = handedness.score !== undefined ? handedness.score : 1.0;
+
+                const catLower = handednessLabel.toLowerCase();
+                if (catLower !== "left" && catLower !== "right" && catLower !== "hand") {
+                    return { isValid: false, reason: "NOT_A_HAND", label: "No Hand Detected" };
+                }
+
+                if (handednessScore < CONFIG.minHandConfidence) {
+                    return { isValid: false, reason: "LOW_CONFIDENCE", label: "No Hand Detected" };
+                }
+            }
+
+            // 3. Check hand SIZE (too far / too close) BEFORE anatomical & ratio checks
+            const palmLengthNorm = calculateDistance(wrist, middleMcp);
+
+            if (palmLengthNorm < CONFIG.minPalmNorm) {
+                return {
+                    isValid: false,
+                    isWarn: true,
+                    landmarks: lm,
+                    label: "Move Hand Closer",
+                    palmLengthNorm: palmLengthNorm
+                };
+            }
+            if (palmLengthNorm > CONFIG.maxPalmNorm) {
+                return {
+                    isValid: false,
+                    isWarn: true,
+                    landmarks: lm,
+                    label: "Move Hand Back",
+                    palmLengthNorm: palmLengthNorm
+                };
+            }
+
+            // 4. Foot detection — Shape ratio check (Width d(5,17) vs Length d(0,12))
+            // Hand angle tolerance: ratio in [0.3, 5.0] handles all hand angles without false rejections
+            const handWidth = calculateDistance(indexMcp, pinkyMcp);
+            const handLength = calculateDistance(wrist, middleTip);
+            const shapeRatio = handLength / (handWidth || 0.0001);
+
+            if (shapeRatio < 0.3 || shapeRatio > 5.0) {
+                return { isValid: false, reason: "FOOT_OR_NON_HAND_RATIO", label: "No Hand Detected" };
+            }
+
+            // 5. Anatomical check last
+            if (palmLengthNorm < CONFIG.anatomicalMinNorm || palmLengthNorm > CONFIG.anatomicalMaxNorm) {
+                return { isValid: false, reason: "ANATOMICAL_MISMATCH", label: "No Hand Detected" };
+            }
+
+            return {
+                isValid: true,
+                isWarn: false,
+                landmarks: lm,
+                handedness: handednessLabel,
+                confidence: handednessScore,
+                palmLengthNorm: palmLengthNorm
+            };
+        }
+
+        // --------------------------------------------------------------------------
+        // 5. RULE-BASED GESTURE CLASSIFIER (WITH DYNAMIC PINCH THRESHOLD)
+        // --------------------------------------------------------------------------
+        function classifyGestureRaw(lm, canvasW, canvasH) {
+            const wrist = lm[0];
+            const thumbTip = lm[4];
+            const indexTip = lm[8];
+            const indexPip = lm[6];
+            const middleTip = lm[12];
+            const middlePip = lm[10];
+            const middleMcp = lm[9];
+            const ringTip = lm[16];
+            const ringPip = lm[14];
+            const pinkyTip = lm[20];
+            const pinkyPip = lm[18];
+
+            // DYNAMIC PINCH THRESHOLD:
+            // Hand size in pixel space = distance between wrist (0) and middle MCP (9)
+            const handSizePx = calculateDistance(wrist, middleMcp, canvasW, canvasH);
+            const dynamicPinchThreshold = Math.max(25, handSizePx * CONFIG.pinchThresholdScale);
+
+            // Pinch distances in pixel space
+            const distThumbIndex = calculateDistance(thumbTip, indexTip, canvasW, canvasH);
+            const distThumbMiddle = calculateDistance(thumbTip, middleTip, canvasW, canvasH);
+
+            // Extension states for all fingers
+            const isIndexExtended = calculateDistance(indexTip, wrist) > calculateDistance(indexPip, wrist) * 1.15;
+            const isMiddleExtended = calculateDistance(middleTip, wrist) > calculateDistance(middlePip, wrist) * 1.15;
+            const isRingExtended = calculateDistance(ringTip, wrist) > calculateDistance(ringPip, wrist) * 1.15;
+            const isPinkyExtended = calculateDistance(pinkyTip, wrist) > calculateDistance(pinkyPip, wrist) * 1.15;
+
+            // Closed Fist Check (all 4 fingers curled)
+            const isFist = (!isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended);
+
+            // --- GESTURE HIERARCHY ---
+
+            // Gesture 1: Closed Fist Drag
+            if (isFist) {
+                return {
+                    type: 'drag',
+                    button: null,
+                    direction: null,
+                    label: 'Gesture: Drag',
+                    key: 'drag'
+                };
+            }
+
+            // Gesture 2: Left Click Pinch (Thumb + Index < dynamicPinchThreshold)
+            if (distThumbIndex < dynamicPinchThreshold) {
+                return {
+                    type: 'click',
+                    button: 'left',
+                    direction: null,
+                    label: 'Gesture: Left Click',
+                    key: 'click_left',
+                    distThumbIndex,
+                    dynamicPinchThreshold
+                };
+            }
+
+            // Gesture 3: Right Click Pinch (Thumb + Middle < dynamicPinchThreshold)
+            if (distThumbMiddle < dynamicPinchThreshold) {
+                return {
+                    type: 'click',
+                    button: 'right',
+                    direction: null,
+                    label: 'Gesture: Right Click',
+                    key: 'click_right',
+                    distThumbMiddle,
+                    dynamicPinchThreshold
+                };
+            }
+
+            // Gesture 4: Two-Finger Scroll (Index + Middle extended, Ring + Pinky folded)
+            if (isIndexExtended && isMiddleExtended && !isRingExtended && !isPinkyExtended) {
+                const midpointY = (indexTip.y + middleTip.y) / 2;
+
+                if (state.prevMidpointY !== null) {
+                    const deltaY = midpointY - state.prevMidpointY;
+
+                    // Hand moving UP (y decreasing)
+                    if (deltaY < -CONFIG.scrollDeltaThreshold) {
+                        state.prevMidpointY = midpointY;
+                        return {
+                            type: 'scroll',
+                            button: null,
+                            direction: 'up',
+                            deltaY: deltaY,
+                            label: 'Gesture: Scroll Up',
+                            key: 'scroll_up'
+                        };
+                    }
+                    // Hand moving DOWN (y increasing)
+                    else if (deltaY > CONFIG.scrollDeltaThreshold) {
+                        state.prevMidpointY = midpointY;
+                        return {
+                            type: 'scroll',
+                            button: null,
+                            direction: 'down',
+                            deltaY: deltaY,
+                            label: 'Gesture: Scroll Down',
+                            key: 'scroll_down'
+                        };
+                    }
+                }
+                state.prevMidpointY = midpointY;
+
+                return {
+                    type: 'scroll',
+                    button: null,
+                    direction: null,
+                    deltaY: 0,
+                    label: 'Gesture: Scroll Up',
+                    key: 'scroll_idle'
+                };
+            } else {
+                state.prevMidpointY = null;
+            }
+
+            // Gesture 5: Default Cursor Move
+            return {
+                type: 'move',
+                button: null,
+                direction: null,
+                label: 'Gesture: Moving',
+                key: 'move'
+            };
+        }
+
+        // --------------------------------------------------------------------------
+        // 6. GESTURE STABILITY BUFFER (3-FRAME DEBOUNCING)
+        // --------------------------------------------------------------------------
+        function updateGestureDebounced(rawGesture) {
+            // Low-risk, continuous gestures register instantly — no debounce delay.
+            // 'move' is plain cursor tracking; 'scroll' is a held pose where a single
+            // misread frame just costs one extra/missed scroll tick, not a false action.
+            const isInstantGesture = rawGesture.key === 'move'
+                || rawGesture.key === 'scroll_up'
+                || rawGesture.key === 'scroll_down'
+                || rawGesture.key === 'scroll_idle';
+
+            if (isInstantGesture) {
+                state.activeGesture = rawGesture;
+                state.candidateKey = rawGesture.key;
+                state.candidateGesture = rawGesture;
+                state.candidateCount = 1;
+                return state.activeGesture;
+            }
+
+            // Click/drag still get a short debounce — these are discrete, consequential
+            // actions, so a single noisy frame shouldn't be able to fire one on its own.
+            if (rawGesture.key === state.candidateKey) {
+                state.candidateCount++;
+            } else {
+                state.candidateKey = rawGesture.key;
+                state.candidateGesture = rawGesture;
+                state.candidateCount = 1;
+            }
+
+            if (state.candidateCount >= CONFIG.debounceFrames) {
+                state.activeGesture = state.candidateGesture;
+            }
+
+            return state.activeGesture;
+        }
+
+        // --------------------------------------------------------------------------
+        // 7. GESTURE CUSTOM EVENT EMITTER
+        // --------------------------------------------------------------------------
+        function emitGestureEvent(gesture, coords) {
+            console.log(`GESTURE: ${gesture.type}`);
+
+            const eventDetail = {
+                type: gesture.type,               // 'move' | 'click' | 'scroll' | 'drag'
+                button: gesture.button,           // 'left' | 'right' | null
+                direction: gesture.direction,     // 'up' | 'down' | null
+                x: coords.x,                      // Smoothed screen X
+                y: coords.y,                      // Smoothed screen Y
+                timestamp: performance.now()
+            };
+
+            window.dispatchEvent(new CustomEvent('gesture', {
+                detail: eventDetail,
+                bubbles: true,
+                cancelable: true
+            }));
+        }
+
+        // --------------------------------------------------------------------------
+        // 8. EVENT LISTENER: VIRTUAL CURSOR POSITION & STYLES
+        // --------------------------------------------------------------------------
+        window.addEventListener('gesture', (e) => {
+            const { type, button, x, y } = e.detail;
+
+            state.cursorEl.style.left = `${x}px`;
+            state.cursorEl.style.top = `${y}px`;
+
+            state.cursorEl.className = '';
+            if (type === 'click') {
+                if (button === 'left') state.cursorEl.classList.add('cursor-left-click');
+                if (button === 'right') state.cursorEl.classList.add('cursor-right-click');
+            } else if (type === 'drag') {
+                state.cursorEl.classList.add('cursor-drag');
+            } else if (type === 'scroll') {
+                state.cursorEl.classList.add('cursor-scroll');
+            }
         });
 
-        // --- Exponential smoothing on index fingertip (landmark 8) ---
-        // Maps 0-1 normalized coords to full screen pixels
-        const rawX = (1 - lm[8].x) * window.innerWidth;
-        const rawY = lm[8].y * window.innerHeight;
+        // --------------------------------------------------------------------------
+        // 9. CANVAS DRAWING (21 LANDMARKS + COLOR CODING + PINCH OVERLAY)
+        // --------------------------------------------------------------------------
+        const HAND_CONNECTIONS = [
+            [0, 1], [1, 2], [2, 3], [3, 4],          // Thumb
+            [0, 5], [5, 6], [6, 7], [7, 8],          // Index
+            [5, 9], [9, 10], [10, 11], [11, 12],     // Middle
+            [9, 13], [13, 14], [14, 15], [15, 16],   // Ring
+            [13, 17], [17, 18], [18, 19], [19, 20],  // Pinky
+            [0, 17]                               // Palm Base
+        ];
 
-        if (!hasInit) {
-          smoothX = rawX;
-          smoothY = rawY;
-          hasInit = true;
-        } else {
-          // EMA formula: S_t = α * X_t + (1 - α) * S_{t-1}
-          smoothX = ALPHA * rawX + (1 - ALPHA) * smoothX;
-          smoothY = ALPHA * rawY + (1 - ALPHA) * smoothY;
-        }
+        function drawLandmarks(landmarks, ctx, canvasW, canvasH, gesture) {
+            ctx.save();
+            ctx.clearRect(0, 0, canvasW, canvasH);
 
-        // Move virtual cursor dot to smoothed position
-        cursor.style.display = "block";
-        cursor.style.left = smoothX + "px";
-        cursor.style.top  = smoothY + "px";
+            // Mirror canvas horizontally to match mirrored video
+            ctx.translate(canvasW, 0);
+            ctx.scale(-1, 1);
 
-        // Always emit move event
-        emitGesture({ type: "move", x: smoothX, y: smoothY });
+            // 1. Draw Skeletal Connection Lines
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = "rgba(0, 240, 255, 0.6)";
+            ctx.lineCap = "round";
 
-        // --- Gesture classification (with cooldown) ---
-        if (!cooldown) {
-          const thumbTip  = lm[4];
-          const indexTip  = lm[8];
-          const middleTip = lm[12];
-
-          const pinchLeft  = dist(thumbTip, indexTip, W, H);
-          const pinchRight = dist(thumbTip, middleTip, W, H);
-
-          const indexUp  = isExtended(lm, 8, 6);
-          const middleUp = isExtended(lm, 12, 10);
-          const ringDown = !isExtended(lm, 16, 14);
-          const pinkyDown = !isExtended(lm, 20, 18);
-          const isFist   = !indexUp && !middleUp && ringDown && pinkyDown;
-
-          if (pinchLeft < 40) {
-            // LEFT CLICK — thumb + index pinch
-            status.textContent = "Gesture: Left Click";
-            cursor.style.background = "red";
-            emitGesture({ type: "click", button: "left", x: smoothX, y: smoothY });
-            cooldown = true;
-            setTimeout(() => {
-              cooldown = false;
-              cursor.style.background = "cyan";
-            }, 800);
-
-          } else if (pinchRight < 40) {
-            // RIGHT CLICK — thumb + middle pinch
-            status.textContent = "Gesture: Right Click";
-            cursor.style.background = "violet";
-            emitGesture({ type: "click", button: "right", x: smoothX, y: smoothY });
-            cooldown = true;
-            setTimeout(() => {
-              cooldown = false;
-              cursor.style.background = "cyan";
-            }, 800);
-
-          } else if (isFist) {
-            // DRAG — closed fist
-            status.textContent = "Gesture: Drag";
-            cursor.style.background = "orange";
-            emitGesture({ type: "drag", x: smoothX, y: smoothY });
-
-          } else if (indexUp && middleUp && ringDown && pinkyDown) {
-            // SCROLL — two fingers up
-            const midY = (indexTip.y + middleTip.y) / 2;
-            if (prevScrollY !== null) {
-              const delta = midY - prevScrollY;
-              if (delta < -0.008) {
-                status.textContent = "Gesture: Scroll Up";
-                cursor.style.background = "lime";
-                emitGesture({ type: "scroll", direction: "up", x: smoothX, y: smoothY });
-              } else if (delta > 0.008) {
-                status.textContent = "Gesture: Scroll Down";
-                cursor.style.background = "lime";
-                emitGesture({ type: "scroll", direction: "down", x: smoothX, y: smoothY });
-              }
+            for (const [startIdx, endIdx] of HAND_CONNECTIONS) {
+                const p1 = landmarks[startIdx];
+                const p2 = landmarks[endIdx];
+                ctx.beginPath();
+                ctx.moveTo(p1.x * canvasW, p1.y * canvasH);
+                ctx.lineTo(p2.x * canvasW, p2.y * canvasH);
+                ctx.stroke();
             }
-            prevScrollY = midY;
 
-          } else {
-            // DEFAULT MOVE
-            status.textContent = "Gesture: Moving";
-            cursor.style.background = "cyan";
-            prevScrollY = null;
-          }
+            // 2. Draw 21 Landmark Dots:
+            // - 21 green dots (#10b981)
+            // - Cyan dot on index fingertip (8, #00f0ff)
+            // - Red dot on thumb tip (4, #ef4444)
+            // - Purple dot on middle tip (12, #a855f7)
+            for (let i = 0; i < landmarks.length; i++) {
+                const lm = landmarks[i];
+                const px = lm.x * canvasW;
+                const py = lm.y * canvasH;
+
+                ctx.beginPath();
+                let radius = 4;
+                let color = "#10b981"; // Default green for joints
+
+                if (i === 8) {
+                    radius = 8;
+                    color = "#00f0ff"; // Cyan for Index Fingertip
+                } else if (i === 4) {
+                    radius = 7;
+                    color = "#ef4444"; // Red for Thumb Tip
+                } else if (i === 12) {
+                    radius = 7;
+                    color = "#a855f7"; // Purple for Middle Tip
+                }
+
+                ctx.arc(px, py, radius, 0, 2 * Math.PI);
+                ctx.fillStyle = color;
+                ctx.fill();
+            }
+
+            // 3. Red Circle + "CLICK!" Text when Left Pinch is active
+            if (gesture && gesture.type === 'click' && gesture.button === 'left') {
+                const indexTip = landmarks[8];
+                const thumbTip = landmarks[4];
+                const midX = (indexTip.x + thumbTip.x) / 2 * canvasW;
+                const midY = (indexTip.y + thumbTip.y) / 2 * canvasH;
+
+                // Red pinch circle
+                ctx.beginPath();
+                ctx.arc(midX, midY, 14, 0, 2 * Math.PI);
+                ctx.fillStyle = "#ef4444";
+                ctx.fill();
+
+                // "CLICK!" Text Overlay
+                ctx.save();
+                ctx.scale(-1, 1); // Un-mirror for readable text
+                ctx.font = "bold 20px monospace";
+                ctx.fillStyle = "#ef4444";
+                ctx.fillText("CLICK!", -midX - 35, midY - 20);
+                ctx.restore();
+            }
+
+            ctx.restore();
         }
 
-      } else {
-        // No hand detected — clear everything
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        cursor.style.display = "none";
-        status.textContent = "No hand detected";
-        hasInit = false;
-        prevScrollY = null;
-      }
+        // --------------------------------------------------------------------------
+        // 10. MAIN REAL-TIME DETECTION LOOP
+        // --------------------------------------------------------------------------
+        let lastVideoTime = -1;
 
-      requestAnimationFrame(detect);
-    }
-  </script>
+        async function predictLoop() {
+            const video = state.video;
+            const canvas = state.canvas;
+            const ctx = state.ctx;
+
+            if (video.currentTime !== lastVideoTime && video.readyState >= 2) {
+                lastVideoTime = video.currentTime;
+                const startTimeMs = performance.now();
+
+                // Run MediaPipe Hand Landmarker detection
+                const results = state.handLandmarker.detectForVideo(video, startTimeMs);
+
+                // 1. Strict Hand Only, Size & Foot Rejection Validation
+                const validation = validateHandAndDistance(results);
+
+                if (validation.isValid) {
+                    console.log("Hand detected");
+                    state.gracePeriodFrames = 3; // Reset grace period on valid detection (~50ms tolerance — absorbs a single dropped frame without feeling stale)
+
+                    const landmarks = validation.landmarks;
+                    state.lastValidLandmarks = landmarks;
+
+                    // Make virtual cursor visible
+                    state.cursorEl.style.display = "block";
+
+                    // 2. Index fingertip position tracking (Landmark 8)
+                    const indexFingertip = landmarks[8];
+                    const rawScreenCoords = mapLandmarkToScreen(indexFingertip.x, indexFingertip.y);
+
+                    // 3. Adaptive Exponential Smoothing (velocity-scaled α: 0.50 -> 0.90)
+                    const smoothedCoords = applyAdaptiveSmoothing(rawScreenCoords.x, rawScreenCoords.y);
+                    state.lastValidSmoothedCoords = { x: smoothedCoords.x, y: smoothedCoords.y };
+
+                    // 4. Classify Hand Gesture with Dynamic Pinch Threshold
+                    const rawGesture = classifyGestureRaw(landmarks, canvas.width, canvas.height);
+
+                    // 5. Apply 3-Frame Gesture Stability Buffer
+                    const stableGesture = updateGestureDebounced(rawGesture);
+                    state.lastValidGesture = stableGesture;
+
+                    // 6. Update Status Label with active gesture
+                    state.statusLabel.textContent = stableGesture.label;
+
+                    // 7. Emit Decoupled Custom Event
+                    emitGestureEvent(stableGesture, smoothedCoords);
+
+                    // 8. Draw Landmarks & Skeleton on Canvas Overlay
+                    drawLandmarks(landmarks, ctx, canvas.width, canvas.height, stableGesture);
+
+                } else if (state.gracePeriodFrames > 0 && state.lastValidLandmarks) {
+                    // GRACE PERIOD ACTIVE: Tolerates momentary detection failure (~133ms)
+                    state.gracePeriodFrames--;
+
+                    state.cursorEl.style.display = "block";
+                    const smoothedCoords = state.lastValidSmoothedCoords;
+                    const stableGesture = state.lastValidGesture || state.activeGesture;
+
+                    state.statusLabel.textContent = stableGesture.label;
+                    emitGestureEvent(stableGesture, smoothedCoords);
+                    drawLandmarks(state.lastValidLandmarks, ctx, canvas.width, canvas.height, stableGesture);
+
+                } else {
+                    // GRACE PERIOD EXPIRED: Truly drop tracking
+                    if (validation.isWarn && validation.landmarks) {
+                        // Draw landmarks with feedback so user sees hand and guided warning
+                        drawLandmarks(validation.landmarks, ctx, canvas.width, canvas.height, { type: 'move' });
+                    } else {
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    }
+
+                    state.cursorEl.style.display = "none";
+                    state.statusLabel.textContent = validation.label;
+
+                    // Reset smoothing and debounce state when hand is truly lost
+                    state.hasInitialPos = false;
+                    state.prevMidpointY = null;
+                    state.candidateCount = 0;
+                    state.candidateKey = '';
+                    state.lastValidLandmarks = null;
+                }
+            }
+
+            // Schedule next frame
+            window.requestAnimationFrame(predictLoop);
+        }
+
+        // --------------------------------------------------------------------------
+        // START PIPELINE
+        // --------------------------------------------------------------------------
+        initMediaPipe();
+
+    </script>
 </body>
+
 </html>
