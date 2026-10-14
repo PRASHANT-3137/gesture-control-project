@@ -260,7 +260,7 @@
     </div>
 
     <!-- Guidance Hint -->
-    <div id="hint-label">👌 Pinch Thumb & Index to Click • ✌️ 2 Fingers to Scroll • ✊ Fist to Drag</div>
+    <div id="hint-label">👌 Pinch Thumb & Index to Click • Pinch Thumb & Middle for Right Click • ✌️ 2 Fingers to Scroll • ✊ Fist to Drag</div>
 
     <!-- Centered Video Feed & Canvas Overlay (Preserved Center Placement) -->
     <div id="video-container">
@@ -294,9 +294,9 @@
             minHandConfidence: 0.50,
             minPalmNorm: 0.03,           // Minimum distance (Hand too far)
             maxPalmNorm: 0.55,           // Maximum distance (Hand too close)
-            anatomicalMinNorm: 0.01,
-            anatomicalMaxNorm: 0.90,
             pinchThresholdScale: 0.38,   // Dynamic pinch threshold = palmSize * 0.38
+            pinchReleaseMultiplier: 1.3, // Release threshold = engage * 1.3
+            pinchConsecutiveFrames: 2,   // Consecutive frames to start pinch
             
             // Screen Deadzone Margins (compensated for 16:9 vs 4:3 aspect ratio)
             deadzoneMarginX: 0.12,       // Extra horizontal margin for easy corner reach
@@ -309,6 +309,7 @@
             
             // Click Timing & Interaction
             clickHoldThresholdMs: 300,   // Max tap duration (ms). Holds > 300ms produce no click on release.
+            fistHoldMs: 150,             // Continuous hold time before fist becomes drag
             scrollSpeedMultiplier: 80,   // Velocity scale for 2-finger scrolling
             scrollDeltaThreshold: 0.007, // Minimum vertical movement for scroll trigger
         };
@@ -330,7 +331,7 @@
             }
             playClick(freq = 800) {
                 try {
-                    this.init();
+                    if (!this.ctx || this.ctx.state === 'suspended') return;
                     const osc = this.ctx.createOscillator();
                     const gain = this.ctx.createGain();
                     osc.type = 'sine';
@@ -420,6 +421,8 @@
             isPinchingRight: false,
             pinchStartTime: 0,
             pinchAnchorCoords: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
+            pinchConsecutiveCount: 0,
+            fistStartTime: 0,
 
             // Smooth Tracking Coordinates
             smoothedCoords: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
@@ -611,93 +614,123 @@
             // Dynamic pinch threshold based on palm size
             const handSizePx = calculateDistance(wrist, middleMcp, canvasW, canvasH);
             const dynamicPinchThreshold = Math.max(28, handSizePx * CONFIG.pinchThresholdScale);
-            const rightPinchThreshold = dynamicPinchThreshold * 1.15;
+
+            const isCurrentlyPinching = state.isPinchingLeft || state.isPinchingRight;
+            const currentThreshold = isCurrentlyPinching
+                ? dynamicPinchThreshold * CONFIG.pinchReleaseMultiplier
+                : dynamicPinchThreshold;
 
             const distThumbIndex = calculateDistance(thumbTip, indexTip, canvasW, canvasH);
             const distThumbMiddle = calculateDistance(thumbTip, middleTip, canvasW, canvasH);
 
-            // Finger extension calculations (1.25 multiplier ensures resting hands don't false-trigger fist)
-            const isIndexExtended = calculateDistance(indexTip, wrist) > calculateDistance(indexPip, wrist) * 1.25;
-            const isMiddleExtended = calculateDistance(middleTip, wrist) > calculateDistance(middlePip, wrist) * 1.25;
-            const isRingExtended = calculateDistance(ringTip, wrist) > calculateDistance(ringPip, wrist) * 1.25;
-            const isPinkyExtended = calculateDistance(pinkyTip, wrist) > calculateDistance(pinkyPip, wrist) * 1.25;
+            // Finger extension calculations (1.15 multiplier)
+            const isIndexExtended = calculateDistance(indexTip, wrist, canvasW, canvasH) > calculateDistance(indexPip, wrist, canvasW, canvasH) * 1.15;
+            const isMiddleExtended = calculateDistance(middleTip, wrist, canvasW, canvasH) > calculateDistance(middlePip, wrist, canvasW, canvasH) * 1.15;
+            const isRingExtended = calculateDistance(ringTip, wrist, canvasW, canvasH) > calculateDistance(ringPip, wrist, canvasW, canvasH) * 1.15;
+            const isPinkyExtended = calculateDistance(pinkyTip, wrist, canvasW, canvasH) > calculateDistance(pinkyPip, wrist, canvasW, canvasH) * 1.15;
 
             // Tight fist check: all 4 fingers deeply curled toward wrist
             const isAllFingersCurled = (!isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended);
 
             // 1. Disambiguated Pinch Detection (Checked FIRST so fist never preempts frame 1 of a pinch)
-            const isThumbIndexPinchCandidate = distThumbIndex < dynamicPinchThreshold;
-            const isThumbMiddlePinchCandidate = distThumbMiddle < rightPinchThreshold;
+            const isThumbIndexPinchCandidate = distThumbIndex < currentThreshold;
+            const isThumbMiddlePinchCandidate = distThumbMiddle < currentThreshold;
 
             if (isThumbMiddlePinchCandidate || isThumbIndexPinchCandidate) {
-                // If Middle finger is closer to thumb (Right Click)
-                if (isThumbMiddlePinchCandidate && (distThumbMiddle <= distThumbIndex * 1.15)) {
-                    return {
-                        type: 'click',
-                        button: 'right',
-                        direction: null,
-                        label: 'Gesture: Right Pinch',
-                        key: 'click_right',
-                        distThumbMiddle,
-                        dynamicPinchThreshold: rightPinchThreshold
-                    };
+                if (!isCurrentlyPinching) {
+                    state.pinchConsecutiveCount = (state.pinchConsecutiveCount || 0) + 1;
                 }
-
-                // If Index finger is closer to thumb (Left Click)
-                if (isThumbIndexPinchCandidate) {
-                    return {
-                        type: 'click',
-                        button: 'left',
-                        direction: null,
-                        label: 'Gesture: Left Pinch',
-                        key: 'click_left',
-                        distThumbIndex,
-                        dynamicPinchThreshold
-                    };
+                if (isCurrentlyPinching || state.pinchConsecutiveCount >= CONFIG.pinchConsecutiveFrames) {
+                    // Decide left vs right by which distance is smaller: right if distThumbMiddle < distThumbIndex, otherwise left
+                    if (distThumbMiddle < distThumbIndex) {
+                        return {
+                            type: 'click',
+                            button: 'right',
+                            direction: null,
+                            label: 'Gesture: Right Pinch',
+                            key: 'click_right',
+                            distThumbMiddle,
+                            dynamicPinchThreshold: currentThreshold
+                        };
+                    } else {
+                        return {
+                            type: 'click',
+                            button: 'left',
+                            direction: null,
+                            label: 'Gesture: Left Pinch',
+                            key: 'click_left',
+                            distThumbIndex,
+                            dynamicPinchThreshold: currentThreshold
+                        };
+                    }
                 }
+            } else {
+                state.pinchConsecutiveCount = 0;
             }
 
             // 2. Fist Gesture (Drag) - Only reached if neither pinch is active
             if (isAllFingersCurled) {
-                return {
-                    type: 'drag',
+                const now = performance.now();
+                if (!state.fistStartTime) {
+                    state.fistStartTime = now;
+                }
+                if (now - state.fistStartTime >= CONFIG.fistHoldMs) {
+                    return {
+                        type: 'drag',
+                        button: null,
+                        direction: null,
+                        label: 'Gesture: Dragging (Fist)',
+                        key: 'drag',
+                        isFist: true
+                    };
+                }
+                // Before 150ms, keep the previous gesture
+                const prev = state.activeGesture || {
+                    type: 'move',
                     button: null,
                     direction: null,
-                    label: 'Gesture: Dragging (Fist)',
-                    key: 'drag'
+                    label: 'Gesture: Moving',
+                    key: 'move'
                 };
+                return {
+                    ...prev,
+                    isFist: true
+                };
+            } else {
+                state.fistStartTime = 0;
             }
 
             // 3. Two-Finger Scroll (Index + Middle extended, Ring + Pinky folded)
             if (isIndexExtended && isMiddleExtended && !isRingExtended && !isPinkyExtended) {
                 const midpointY = (indexTip.y + middleTip.y) / 2;
 
-                if (state.prevScrollMidpointY !== null) {
-                    const deltaY = midpointY - state.prevScrollMidpointY;
-
-                    if (deltaY < -CONFIG.scrollDeltaThreshold) {
-                        state.prevScrollMidpointY = midpointY;
-                        return {
-                            type: 'scroll',
-                            button: null,
-                            direction: 'up',
-                            deltaY: deltaY,
-                            label: 'Gesture: Scroll Up',
-                            key: 'scroll_up'
-                        };
-                    } else if (deltaY > CONFIG.scrollDeltaThreshold) {
-                        state.prevScrollMidpointY = midpointY;
-                        return {
-                            type: 'scroll',
-                            button: null,
-                            direction: 'down',
-                            deltaY: deltaY,
-                            label: 'Gesture: Scroll Down',
-                            key: 'scroll_down'
-                        };
-                    }
+                if (state.prevScrollMidpointY === null) {
+                    state.prevScrollMidpointY = midpointY;
                 }
-                state.prevScrollMidpointY = midpointY;
+
+                const deltaY = midpointY - state.prevScrollMidpointY;
+
+                if (deltaY < -CONFIG.scrollDeltaThreshold) {
+                    state.prevScrollMidpointY -= CONFIG.scrollDeltaThreshold;
+                    return {
+                        type: 'scroll',
+                        button: null,
+                        direction: 'up',
+                        deltaY: deltaY,
+                        label: 'Gesture: Scroll Up',
+                        key: 'scroll_up'
+                    };
+                } else if (deltaY > CONFIG.scrollDeltaThreshold) {
+                    state.prevScrollMidpointY += CONFIG.scrollDeltaThreshold;
+                    return {
+                        type: 'scroll',
+                        button: null,
+                        direction: 'down',
+                        deltaY: deltaY,
+                        label: 'Gesture: Scroll Down',
+                        key: 'scroll_down'
+                    };
+                }
 
                 return {
                     type: 'scroll',
@@ -767,8 +800,10 @@
          * State Machine to handle discrete clicks, hold-to-drag, and pointer events
          */
         function processGestureEvents(gesture, coords, now) {
+            const isFist = gesture.type === 'drag' || gesture.isFist;
+
             // A. Left Pinch Handling
-            if (gesture.type === 'click' && gesture.button === 'left') {
+            if (gesture.type === 'click' && gesture.button === 'left' && !isFist) {
                 // Ignore accidental left pinch trigger if right pinch was just released
                 if (now - lastPinchReleaseTime > 200 && !state.isPinchingLeft && !state.isPinchingRight) {
                     state.isPinchingLeft = true;
@@ -778,7 +813,7 @@
             } else {
                 if (state.isPinchingLeft) {
                     const duration = now - state.pinchStartTime;
-                    if (duration < CONFIG.clickHoldThresholdMs) {
+                    if (duration < CONFIG.clickHoldThresholdMs && !isFist) {
                         triggerNativeClickAt(state.pinchAnchorCoords.x, state.pinchAnchorCoords.y, 'left');
                         lastPinchReleaseTime = now;
                     }
@@ -787,7 +822,7 @@
             }
 
             // B. Right Pinch Handling
-            if (gesture.type === 'click' && gesture.button === 'right') {
+            if (gesture.type === 'click' && gesture.button === 'right' && !isFist) {
                 if (now - lastPinchReleaseTime > 200 && !state.isPinchingRight && !state.isPinchingLeft) {
                     state.isPinchingRight = true;
                     state.pinchStartTime = now;
@@ -796,7 +831,7 @@
             } else {
                 if (state.isPinchingRight) {
                     const duration = now - state.pinchStartTime;
-                    if (duration < CONFIG.clickHoldThresholdMs) {
+                    if (duration < CONFIG.clickHoldThresholdMs && !isFist) {
                         triggerNativeClickAt(state.pinchAnchorCoords.x, state.pinchAnchorCoords.y, 'right');
                         lastPinchReleaseTime = now;
                     }
@@ -831,11 +866,11 @@
             let activeX = coords.x;
             let activeY = coords.y;
 
-            // Stabilize position during initial pinch tap (< 180ms) to prevent jitter;
+            // Stabilize position during initial pinch tap (< CONFIG.clickHoldThresholdMs) to prevent jitter;
             // if held longer, follow hand smoothly for dragging.
             if (state.isPinchingLeft || state.isPinchingRight) {
                 const pinchDuration = now - state.pinchStartTime;
-                if (pinchDuration < 180) {
+                if (pinchDuration < CONFIG.clickHoldThresholdMs) {
                     activeX = state.pinchAnchorCoords.x;
                     activeY = state.pinchAnchorCoords.y;
                 }
@@ -868,7 +903,7 @@
             [0, 17]
         ];
 
-        function drawLandmarks(landmarks, ctx, canvasW, canvasH, gesture) {
+        function drawLandmarks(landmarks, ctx, canvasW, canvasH) {
             ctx.save();
             ctx.clearRect(0, 0, canvasW, canvasH);
 
@@ -920,20 +955,26 @@
             const thumbTip = landmarks[4];
             const indexTip = landmarks[8];
             const middleTip = landmarks[12];
+            const wrist = landmarks[0];
+            const middleMcp = landmarks[9];
+            const handSizePx = calculateDistance(wrist, middleMcp, canvasW, canvasH);
+            const dynamicPinchThreshold = Math.max(28, handSizePx * CONFIG.pinchThresholdScale);
+            const haloThreshold = dynamicPinchThreshold * (85 / 32);
+
             const distLeftPx = calculateDistance(thumbTip, indexTip, canvasW, canvasH);
             const distRightPx = calculateDistance(thumbTip, middleTip, canvasW, canvasH);
 
-            if (distLeftPx < 85) {
+            if (distLeftPx < haloThreshold) {
                 const midX = ((thumbTip.x + indexTip.x) / 2) * canvasW;
                 const midY = ((thumbTip.y + indexTip.y) / 2) * canvasH;
 
                 ctx.beginPath();
                 ctx.arc(midX, midY, Math.max(12, distLeftPx * 0.4), 0, 2 * Math.PI);
-                ctx.strokeStyle = distLeftPx < 32 ? "#ef4444" : "rgba(0, 240, 255, 0.7)";
+                ctx.strokeStyle = distLeftPx < dynamicPinchThreshold ? "#ef4444" : "rgba(0, 240, 255, 0.7)";
                 ctx.lineWidth = 2;
                 ctx.stroke();
 
-                if (distLeftPx < 32) {
+                if (distLeftPx < dynamicPinchThreshold) {
                     ctx.fillStyle = "rgba(239, 68, 68, 0.85)";
                     ctx.fill();
 
@@ -946,17 +987,17 @@
                 }
             } 
             // 4. Right Pinch (Thumb + Middle) Proximity Halo
-            else if (distRightPx < 85) {
+            else if (distRightPx < haloThreshold) {
                 const midX = ((thumbTip.x + middleTip.x) / 2) * canvasW;
                 const midY = ((thumbTip.y + middleTip.y) / 2) * canvasH;
 
                 ctx.beginPath();
                 ctx.arc(midX, midY, Math.max(12, distRightPx * 0.4), 0, 2 * Math.PI);
-                ctx.strokeStyle = distRightPx < 32 ? "#a855f7" : "rgba(168, 85, 247, 0.7)";
+                ctx.strokeStyle = distRightPx < dynamicPinchThreshold ? "#a855f7" : "rgba(168, 85, 247, 0.7)";
                 ctx.lineWidth = 2;
                 ctx.stroke();
 
-                if (distRightPx < 32) {
+                if (distRightPx < dynamicPinchThreshold) {
                     ctx.fillStyle = "rgba(168, 85, 247, 0.85)";
                     ctx.fill();
 
@@ -1000,8 +1041,14 @@
                     state.activeGesture = gesture;
                     state.lastValidGesture = gesture;
 
-                    // 2. Stable Tracking pointer on Index Tip (Landmark 8)
-                    const rawCoords = mapLandmarkToScreen(landmarks[8].x, landmarks[8].y);
+                    // 2. Stable Tracking pointer on Index Tip (or Midpoint of Thumb & Middle for Right Pinch)
+                    let pointerX = landmarks[8].x;
+                    let pointerY = landmarks[8].y;
+                    if (gesture.type === 'click' && gesture.button === 'right') {
+                        pointerX = (landmarks[4].x + landmarks[12].x) / 2;
+                        pointerY = (landmarks[4].y + landmarks[12].y) / 2;
+                    }
+                    const rawCoords = mapLandmarkToScreen(pointerX, pointerY);
                     const smoothX = state.filterX.filter(rawCoords.x, now);
                     const smoothY = state.filterY.filter(rawCoords.y, now);
                     const smoothedCoords = { x: smoothX, y: smoothY };
@@ -1016,7 +1063,7 @@
                     processGestureEvents(gesture, smoothedCoords, now);
 
                     // 6. Draw Landmarks & Visual Proximity Halo
-                    drawLandmarks(landmarks, ctx, canvas.width, canvas.height, gesture);
+                    drawLandmarks(landmarks, ctx, canvas.width, canvas.height);
 
                 } else if (state.gracePeriodFrames > 0 && state.lastValidLandmarks) {
                     // Grace Period: Tolerate momentary single dropped frame (hold visual state only)
@@ -1025,12 +1072,12 @@
                     const gesture = state.lastValidGesture || state.activeGesture;
 
                     updateCursorVisual(smoothedCoords, gesture, now);
-                    drawLandmarks(state.lastValidLandmarks, ctx, canvas.width, canvas.height, gesture);
+                    drawLandmarks(state.lastValidLandmarks, ctx, canvas.width, canvas.height);
 
                 } else {
                     // Hand lost
                     if (validation.isWarn && validation.landmarks) {
-                        drawLandmarks(validation.landmarks, ctx, canvas.width, canvas.height, { type: 'move' });
+                        drawLandmarks(validation.landmarks, ctx, canvas.width, canvas.height);
                     } else {
                         ctx.clearRect(0, 0, canvas.width, canvas.height);
                     }
@@ -1044,6 +1091,8 @@
                     state.isPinchingRight = false;
                     state.prevScrollMidpointY = null;
                     state.lastValidLandmarks = null;
+                    state.fistStartTime = 0;
+                    state.pinchConsecutiveCount = 0;
                 }
             }
 
@@ -1089,6 +1138,7 @@
         // Unlock Web Audio on first user interaction
         window.addEventListener('click', () => sfx.init(), { once: true });
         window.addEventListener('touchstart', () => sfx.init(), { once: true });
+        window.addEventListener('keydown', () => sfx.init(), { once: true });
 
         // Initialize Pipeline
         initMediaPipe();
