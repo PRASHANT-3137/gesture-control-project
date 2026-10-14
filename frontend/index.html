@@ -372,6 +372,9 @@
             pinchThresholdScale: 0.38,   // Dynamic pinch threshold = palmSize * 0.38
             pinchReleaseMultiplier: 1.3, // Release threshold = engage * 1.3
             pinchConsecutiveFrames: 2,   // Consecutive frames to start pinch
+            pinchButtonMargin: 0.75,     // Closer finger must be < 75% of the other's distance to win instantly
+            pinchDisambiguationFrames: 5,// Extra frames to wait when left/right is ambiguous
+            firmPinchRatio: 0.6,         // Firm pinch (tight touch) is never turned into a fist/drag
 
             // Screen deadzone margins (compensated for 16:9 vs 4:3 aspect ratio)
             deadzoneMarginX: 0.12,
@@ -383,7 +386,7 @@
             oneEuroDCutoff: 1.0,
 
             // Click timing & interaction
-            clickHoldThresholdMs: 300,   // Max tap duration; longer holds produce no click on release
+            clickHoldThresholdMs: 600,   // Max tap duration; longer holds produce no click on release
             fistHoldMs: 150,             // Continuous hold time before fist becomes drag
             scrollSpeedMultiplier: 40,
             scrollDeltaThreshold: 0.015,
@@ -727,6 +730,18 @@
 
             const now = performance.now();
 
+            // Pinch geometry (computed first so a firm pinch can outrank the fist check)
+            const handSizePx = calculateDistance(wrist, middleMcp, canvasW, canvasH);
+            const dynamicPinchThreshold = Math.max(28, handSizePx * CONFIG.pinchThresholdScale);
+            const releaseThreshold = dynamicPinchThreshold * CONFIG.pinchReleaseMultiplier;
+
+            const distThumbIndex = calculateDistance(thumbTip, indexTip, canvasW, canvasH);
+            const distThumbMiddle = calculateDistance(thumbTip, middleTip, canvasW, canvasH);
+
+            const isPinchActive = state.isPinchingLeft || state.isPinchingRight;
+            const activePinchDist = state.isPinchingLeft ? distThumbIndex : distThumbMiddle;
+            const isFirmPinch = isPinchActive && activePinchDist < dynamicPinchThreshold * CONFIG.firmPinchRatio;
+
             if (state.isDragActive) {
                 // While dragging: stay in 'drag' as long as the fingers stay curled
                 if (isAllFingersCurled) {
@@ -742,8 +757,9 @@
                     state.fistStartTime = 0;
                 }
             } else {
-                // Not dragging: start the timer only while ALL FOUR fingers are strictly curled
-                if (isAllFingersStrictlyCurled) {
+                // Not dragging: start the timer only while ALL FOUR fingers are strictly curled,
+                // and never while a firm pinch is in progress (so a click is not turned into a drag)
+                if (isAllFingersStrictlyCurled && !isFirmPinch) {
                     if (!state.fistStartTime) {
                         state.fistStartTime = now;
                     }
@@ -761,14 +777,6 @@
                     state.fistStartTime = 0;
                 }
             }
-
-            // Dynamic pinch threshold based on palm size
-            const handSizePx = calculateDistance(wrist, middleMcp, canvasW, canvasH);
-            const dynamicPinchThreshold = Math.max(28, handSizePx * CONFIG.pinchThresholdScale);
-            const releaseThreshold = dynamicPinchThreshold * CONFIG.pinchReleaseMultiplier;
-
-            const distThumbIndex = calculateDistance(thumbTip, indexTip, canvasW, canvasH);
-            const distThumbMiddle = calculateDistance(thumbTip, middleTip, canvasW, canvasH);
 
             // 1. Pinch detection
             // Once a pinch button is locked, keep it while its own thumb distance stays below the release threshold.
@@ -799,33 +807,44 @@
                 }
                 state.pinchConsecutiveCount = 0;
             } else {
-                // "Smaller distance wins" only chooses the button when a pinch starts.
                 const isThumbIndexPinchCandidate = distThumbIndex < dynamicPinchThreshold;
                 const isThumbMiddlePinchCandidate = distThumbMiddle < dynamicPinchThreshold;
 
                 if (isThumbIndexPinchCandidate || isThumbMiddlePinchCandidate) {
                     state.pinchConsecutiveCount = (state.pinchConsecutiveCount || 0) + 1;
+
                     if (state.pinchConsecutiveCount >= CONFIG.pinchConsecutiveFrames) {
-                        if (distThumbMiddle < distThumbIndex) {
-                            return {
-                                type: 'click',
-                                button: 'right',
-                                direction: null,
-                                label: 'Gesture: Right Pinch',
-                                key: 'click_right',
-                                distThumbMiddle,
-                                dynamicPinchThreshold
-                            };
-                        } else {
-                            return {
-                                type: 'click',
-                                button: 'left',
-                                direction: null,
-                                label: 'Gesture: Left Pinch',
-                                key: 'click_left',
-                                distThumbIndex,
-                                dynamicPinchThreshold
-                            };
+                        // Index and middle tips sit next to each other, so the thumb is often close to both.
+                        // Commit to a button only when one is clearly closer (or after waiting a few frames).
+                        const closer = Math.min(distThumbIndex, distThumbMiddle);
+                        const farther = Math.max(distThumbIndex, distThumbMiddle);
+                        const isClearWinner = (isThumbIndexPinchCandidate !== isThumbMiddlePinchCandidate)
+                            || closer < farther * CONFIG.pinchButtonMargin;
+                        const waitedLongEnough = state.pinchConsecutiveCount >=
+                            CONFIG.pinchConsecutiveFrames + CONFIG.pinchDisambiguationFrames;
+
+                        if (isClearWinner || waitedLongEnough) {
+                            if (distThumbMiddle < distThumbIndex) {
+                                return {
+                                    type: 'click',
+                                    button: 'right',
+                                    direction: null,
+                                    label: 'Gesture: Right Pinch',
+                                    key: 'click_right',
+                                    distThumbMiddle,
+                                    dynamicPinchThreshold
+                                };
+                            } else {
+                                return {
+                                    type: 'click',
+                                    button: 'left',
+                                    direction: null,
+                                    label: 'Gesture: Left Pinch',
+                                    key: 'click_left',
+                                    distThumbIndex,
+                                    dynamicPinchThreshold
+                                };
+                            }
                         }
                     }
                 } else {
