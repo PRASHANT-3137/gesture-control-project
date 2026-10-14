@@ -1,6 +1,3 @@
-<!-- Here is the complete, edited code for [`index.html`](file:///c:/Users/Prashant_kumar/gesture_control/index.html):
- -->
-<!-- ```html -->
 <!DOCTYPE html>
 <html lang="en">
 
@@ -13,7 +10,8 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <style>
         /* ==========================================================================
-           CORE LAYOUT & DESIGN TOKENS (Centered Camera Layout Preserved)
+           CORE LAYOUT & DESIGN TOKENS
+           Vertical stack: status label -> camera -> test controls. Hint pill at bottom.
            ========================================================================== */
         :root {
             --bg-color: #07090e;
@@ -41,55 +39,21 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
+            justify-content: flex-start;   /* content starts at the top, no overlap */
             min-height: 100vh;
             overflow-x: hidden;
             padding: 24px;
-            background-image: 
+            padding-bottom: 100px;         /* keeps content clear of the hint pill */
+            background-image:
                 radial-gradient(circle at 15% 15%, rgba(0, 240, 255, 0.06) 0%, transparent 40%),
                 radial-gradient(circle at 85% 85%, rgba(168, 85, 247, 0.06) 0%, transparent 40%);
         }
 
-        /* Centered Video & Canvas Container */
-        #video-container {
-            position: relative;
-            width: 640px;
-            height: 480px;
-            background: #111827;
-            border: 2px solid rgba(0, 240, 255, 0.25);
-            border-radius: 16px;
-            overflow: hidden;
-            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 25px rgba(0, 240, 255, 0.15);
-            transition: border-color 0.2s ease, box-shadow 0.2s ease;
-        }
-
-        /* Mirrored Video Feed */
-        #webcam-video {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transform: scaleX(-1);
-        }
-
-        /* Landmark Overlay Canvas */
-        #output-canvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 10;
-            pointer-events: none;
-        }
-
-        /* Telemetry Status Label */
+        /* Telemetry status label: in normal flow, above the camera */
         #status-label {
-            position: fixed;
-            top: 20px;
-            left: 20px;
+            position: relative;
+            margin-bottom: 16px;
+            max-width: 100%;
             padding: 10px 18px;
             background: var(--card-bg);
             backdrop-filter: blur(12px);
@@ -100,14 +64,19 @@
             font-weight: 600;
             font-family: var(--font-mono);
             letter-spacing: 0.5px;
-            z-index: 999999;
             box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
             display: flex;
             align-items: center;
             gap: 10px;
+            z-index: 20;
+        }
+
+        #status-text {
+            overflow-wrap: anywhere;
         }
 
         .status-dot {
+            flex: none;
             width: 8px;
             height: 8px;
             border-radius: 50%;
@@ -121,14 +90,52 @@
             50% { opacity: 0.4; transform: scale(0.85); }
         }
 
-        /* Interactive Gesture Testing Section below centered camera */
+        /* Video & canvas container: shrinks on small windows, keeps camera aspect ratio */
+        #video-container {
+            position: relative;
+            width: 640px;
+            max-width: 100%;
+            height: auto;
+            aspect-ratio: 4 / 3;           /* updated from the real camera size at runtime */
+            background: #111827;
+            border: 2px solid rgba(0, 240, 255, 0.25);
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 25px rgba(0, 240, 255, 0.15);
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        /* Mirrored video feed */
+        #webcam-video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+
+        /* Landmark overlay canvas */
+        #output-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        /* Interactive gesture testing section below the camera */
         #test-controls {
             margin-top: 24px;
             display: flex;
             gap: 16px;
             flex-wrap: wrap;
             justify-content: center;
-            max-width: 640px;
+            width: 640px;
+            max-width: 100%;
             z-index: 20;
         }
 
@@ -159,7 +166,54 @@
             color: #000;
         }
 
-        /* Hint Label at Bottom of Screen */
+        /* Draggable test box */
+        #drag-box {
+            background: rgba(245, 158, 11, 0.12);
+            border: 2px dashed rgba(245, 158, 11, 0.6);
+            color: var(--amber);
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-family: var(--font-ui);
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: grab;
+            user-select: none;
+            touch-action: none;
+            transition: box-shadow 0.2s ease, border-color 0.2s ease;
+        }
+
+        #drag-box:hover {
+            background: rgba(245, 158, 11, 0.22);
+            box-shadow: 0 0 15px rgba(245, 158, 11, 0.4);
+        }
+
+        /* Scrollable area for testing */
+        #test-scroll-area {
+            width: 100%;
+            height: 120px;
+            overflow-y: auto;
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid rgba(0, 240, 255, 0.25);
+            border-radius: 8px;
+            padding: 8px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            font-size: 0.85rem;
+            color: rgba(255, 255, 255, 0.8);
+            scrollbar-width: thin;
+            scrollbar-color: var(--cyan) rgba(255, 255, 255, 0.05);
+        }
+
+        .scroll-item {
+            flex: none;
+            padding: 6px 10px;
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 4px;
+            border-left: 3px solid var(--cyan);
+        }
+
+        /* Hint label at bottom of screen */
         #hint-label {
             position: fixed;
             bottom: 20px;
@@ -167,7 +221,10 @@
             transform: translateX(-50%);
             color: rgba(255, 255, 255, 0.7);
             font-family: var(--font-mono);
-            font-size: 13px;
+            font-size: 12px;
+            pointer-events: none;
+            max-width: 92vw;
+            text-align: center;
             background: rgba(15, 23, 42, 0.8);
             backdrop-filter: blur(8px);
             border: 1px solid rgba(255, 255, 255, 0.1);
@@ -177,7 +234,7 @@
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
         }
 
-        /* Virtual Cursor following Index Fingertip */
+        /* Virtual cursor following the index fingertip */
         #cursor {
             position: fixed;
             top: 0;
@@ -223,7 +280,7 @@
             transform: translate(-50%, -50%) scale(1.2);
         }
 
-        /* Ripple Animation on Click */
+        /* Ripple animation on click */
         .click-ripple {
             position: fixed;
             border-radius: 50%;
@@ -248,6 +305,11 @@
             0% { width: 10px; height: 10px; opacity: 1; border-color: var(--cyan); }
             100% { width: 70px; height: 70px; opacity: 0; border-color: var(--purple); }
         }
+
+        @media (prefers-reduced-motion: reduce) {
+            .status-dot { animation: none; }
+            .click-ripple { animation-duration: 0.01s; }
+        }
     </style>
 </head>
 
@@ -260,9 +322,9 @@
     </div>
 
     <!-- Guidance Hint -->
-    <div id="hint-label">👌 Pinch Thumb & Index to Click • Pinch Thumb & Middle for Right Click • ✌️ 2 Fingers to Scroll • ✊ Fist to Drag</div>
+    <div id="hint-label">👌 Pinch = Click • Thumb + Middle = Right Click • ✌️ Two Fingers = Scroll • ✊ Fist = Drag • G = Pause/Resume</div>
 
-    <!-- Centered Video Feed & Canvas Overlay (Preserved Center Placement) -->
+    <!-- Video Feed & Canvas Overlay -->
     <div id="video-container">
         <video id="webcam-video" autoplay playsinline muted></video>
         <canvas id="output-canvas"></canvas>
@@ -273,13 +335,26 @@
         <button id="btn-counter" class="test-btn">Left Click Target: 0</button>
         <button id="btn-toggle" class="test-btn">Toggle State: OFF ⚪</button>
         <button id="btn-right" class="test-btn">Right Click Target: 0</button>
+        <div id="drag-box">Drag Me ✊</div>
+        <div id="test-scroll-area">
+            <div class="scroll-item">📜 Scroll Item 1</div>
+            <div class="scroll-item">📜 Scroll Item 2</div>
+            <div class="scroll-item">📜 Scroll Item 3</div>
+            <div class="scroll-item">📜 Scroll Item 4</div>
+            <div class="scroll-item">📜 Scroll Item 5</div>
+            <div class="scroll-item">📜 Scroll Item 6</div>
+            <div class="scroll-item">📜 Scroll Item 7</div>
+            <div class="scroll-item">📜 Scroll Item 8</div>
+            <div class="scroll-item">📜 Scroll Item 9</div>
+            <div class="scroll-item">📜 Scroll Item 10</div>
+        </div>
     </div>
 
     <!-- Virtual Screen Cursor -->
     <div id="cursor"></div>
 
     <!-- ==========================================================================
-       REFINED COMPUTER VISION & GESTURE PIPELINE (MediaPipe Tasks Vision 0.10.0)
+       COMPUTER VISION & GESTURE PIPELINE (MediaPipe Tasks Vision 0.10.0)
        ========================================================================== -->
     <script type="module">
         import {
@@ -292,30 +367,35 @@
         // --------------------------------------------------------------------------
         const CONFIG = {
             minHandConfidence: 0.50,
-            minPalmNorm: 0.03,           // Minimum distance (Hand too far)
-            maxPalmNorm: 0.55,           // Maximum distance (Hand too close)
+            minPalmNorm: 0.03,           // Minimum distance (hand too far)
+            maxPalmNorm: 0.55,           // Maximum distance (hand too close)
             pinchThresholdScale: 0.38,   // Dynamic pinch threshold = palmSize * 0.38
             pinchReleaseMultiplier: 1.3, // Release threshold = engage * 1.3
             pinchConsecutiveFrames: 2,   // Consecutive frames to start pinch
-            
-            // Screen Deadzone Margins (compensated for 16:9 vs 4:3 aspect ratio)
-            deadzoneMarginX: 0.12,       // Extra horizontal margin for easy corner reach
-            deadzoneMarginY: 0.08,       // Vertical margin
-            
-            // One Euro Filter Parameters (Zero jitter when still, instant response when fast)
-            oneEuroMinCutoff: 1.2,       // Low-speed cutoff (Hz) -> ultra stable cursor
-            oneEuroBeta: 0.045,          // Velocity coefficient -> zero latency on fast motion
-            oneEuroDCutoff: 1.0,         // Derivative cutoff
-            
-            // Click Timing & Interaction
-            clickHoldThresholdMs: 300,   // Max tap duration (ms). Holds > 300ms produce no click on release.
+
+            // Screen deadzone margins (compensated for 16:9 vs 4:3 aspect ratio)
+            deadzoneMarginX: 0.12,
+            deadzoneMarginY: 0.08,
+
+            // One Euro Filter parameters
+            oneEuroMinCutoff: 1.2,
+            oneEuroBeta: 0.045,
+            oneEuroDCutoff: 1.0,
+
+            // Click timing & interaction
+            clickHoldThresholdMs: 300,   // Max tap duration; longer holds produce no click on release
             fistHoldMs: 150,             // Continuous hold time before fist becomes drag
-            scrollSpeedMultiplier: 80,   // Velocity scale for 2-finger scrolling
-            scrollDeltaThreshold: 0.007, // Minimum vertical movement for scroll trigger
+            scrollSpeedMultiplier: 40,
+            scrollDeltaThreshold: 0.015,
+            scrollInverted: false,
+
+            // Pointer history
+            pointerHistoryMs: 500,       // How long to keep smoothed positions
+            pointerHistoryMaxGapMs: 150  // Max allowed gap when looking up a past position
         };
 
         // --------------------------------------------------------------------------
-        // AUDIO SYNTHESIZER (Haptic-style audio feedback on clicks)
+        // AUDIO SYNTHESIZER (click feedback)
         // --------------------------------------------------------------------------
         class SoundFX {
             constructor() {
@@ -353,7 +433,7 @@
         const sfx = new SoundFX();
 
         // --------------------------------------------------------------------------
-        // ONE EURO FILTER IMPLEMENTATION (Casiez et al. 2012)
+        // ONE EURO FILTER (Casiez et al. 2012)
         // --------------------------------------------------------------------------
         class OneEuroFilter {
             constructor(minCutoff = 1.0, beta = 0.0, dCutoff = 1.0) {
@@ -407,16 +487,19 @@
         const state = {
             handLandmarker: null,
             video: document.getElementById("webcam-video"),
+            videoContainer: document.getElementById("video-container"),
             canvas: document.getElementById("output-canvas"),
             ctx: document.getElementById("output-canvas").getContext("2d"),
             cursorEl: document.getElementById("cursor"),
             statusText: document.getElementById("status-text"),
 
-            // 1€ Filter instances for X and Y coordinates
+            // 1€ filter instances
             filterX: new OneEuroFilter(CONFIG.oneEuroMinCutoff, CONFIG.oneEuroBeta, CONFIG.oneEuroDCutoff),
             filterY: new OneEuroFilter(CONFIG.oneEuroMinCutoff, CONFIG.oneEuroBeta, CONFIG.oneEuroDCutoff),
+            dragFilterX: new OneEuroFilter(CONFIG.oneEuroMinCutoff, CONFIG.oneEuroBeta, CONFIG.oneEuroDCutoff),
+            dragFilterY: new OneEuroFilter(CONFIG.oneEuroMinCutoff, CONFIG.oneEuroBeta, CONFIG.oneEuroDCutoff),
 
-            // Pinch Stability & Coordinate Anchor
+            // Pinch stability & coordinate anchor
             isPinchingLeft: false,
             isPinchingRight: false,
             pinchStartTime: 0,
@@ -424,7 +507,20 @@
             pinchConsecutiveCount: 0,
             fistStartTime: 0,
 
-            // Smooth Tracking Coordinates
+            // Drag and hover tracking
+            isDragging: false,
+            dragTarget: null,
+            hoveredElement: null,
+            isDragActive: false,
+            dragGrabPoint: null,
+            dragStartLm9: null,
+            controlEnabled: true,
+            lastDragCoords: null,
+
+            // Pointer history buffer
+            pointerHistory: [],
+
+            // Smoothed coordinates
             smoothedCoords: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
 
             // Grace period buffer (absorbs 3 dropped frames)
@@ -435,14 +531,24 @@
 
             // Scroll velocity baseline
             prevScrollMidpointY: null,
+            smoothScrollMidpointY: null,
 
-            // Active debounced gesture
+            // Active gesture
             activeGesture: { type: 'move', button: null, direction: null, label: 'Gesture: Moving' }
         };
 
         // --------------------------------------------------------------------------
         // 1. INITIALIZE MEDIAPIPE HAND LANDMARKER
         // --------------------------------------------------------------------------
+        const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+        const LANDMARKER_OPTIONS = {
+            runningMode: "VIDEO",
+            numHands: 1,
+            minHandDetectionConfidence: CONFIG.minHandConfidence,
+            minHandPresenceConfidence: CONFIG.minHandConfidence,
+            minTrackingConfidence: CONFIG.minHandConfidence
+        };
+
         async function initMediaPipe() {
             try {
                 state.statusText.textContent = "Loading MediaPipe...";
@@ -453,27 +559,14 @@
 
                 try {
                     state.handLandmarker = await HandLandmarker.createFromOptions(vision, {
-                        baseOptions: {
-                            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-                            delegate: "GPU"
-                        },
-                        runningMode: "VIDEO",
-                        numHands: 1,
-                        minHandDetectionConfidence: 0.5,
-                        minHandPresenceConfidence: 0.5,
-                        minTrackingConfidence: 0.5
+                        baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
+                        ...LANDMARKER_OPTIONS
                     });
                 } catch (gpuErr) {
                     console.warn("GPU failed, fallback to CPU:", gpuErr);
                     state.handLandmarker = await HandLandmarker.createFromOptions(vision, {
-                        baseOptions: {
-                            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
-                        },
-                        runningMode: "VIDEO",
-                        numHands: 1,
-                        minHandDetectionConfidence: 0.5,
-                        minHandPresenceConfidence: 0.5,
-                        minTrackingConfidence: 0.5
+                        baseOptions: { modelAssetPath: MODEL_URL },
+                        ...LANDMARKER_OPTIONS
                     });
                 }
 
@@ -501,13 +594,18 @@
 
                 state.video.srcObject = stream;
 
+                // { once: true } prevents a second prediction loop if the event fires again
                 state.video.addEventListener("loadeddata", () => {
-                    state.canvas.width = state.video.videoWidth || 640;
-                    state.canvas.height = state.video.videoHeight || 480;
+                    const vw = state.video.videoWidth || 640;
+                    const vh = state.video.videoHeight || 480;
+                    state.canvas.width = vw;
+                    state.canvas.height = vh;
+                    // Match the container to the real camera ratio so the skeleton lines up with the video
+                    state.videoContainer.style.aspectRatio = `${vw} / ${vh}`;
 
                     state.statusText.textContent = "Ready - Show Hand";
                     window.requestAnimationFrame(predictLoop);
-                });
+                }, { once: true });
 
                 await state.video.play();
             } catch (err) {
@@ -531,7 +629,7 @@
 
         /**
          * Maps camera landmarks to viewport pixels with separate X & Y margins
-         * to handle 16:9 screen vs 4:3 camera aspect ratios naturally.
+         * to handle 16:9 screen vs 4:3 camera aspect ratios.
          */
         function mapLandmarkToScreen(normX, normY) {
             const mirroredX = 1 - normX;
@@ -564,7 +662,7 @@
 
             // 1. Handedness confidence
             if (results.handedness && results.handedness.length > 0 && results.handedness[0].length > 0) {
-                const handednessScore = results.handedness[0][0].score || 1.0;
+                const handednessScore = results.handedness[0][0].score ?? 1.0;
                 if (handednessScore < CONFIG.minHandConfidence) {
                     return { isValid: false, reason: "LOW_CONFIDENCE", label: "No Hand Detected" };
                 }
@@ -573,13 +671,13 @@
             // 2. Hand distance / size validation
             const palmLengthNorm = calculateDistance(wrist, middleMcp);
             if (palmLengthNorm < CONFIG.minPalmNorm) {
-                return { isValid: false, isWarn: true, landmarks: lm, label: "Move Hand Closer" };
+                return { isValid: false, isWarn: true, reason: "TOO_FAR", landmarks: lm, label: "Move Hand Closer" };
             }
             if (palmLengthNorm > CONFIG.maxPalmNorm) {
-                return { isValid: false, isWarn: true, landmarks: lm, label: "Move Hand Back" };
+                return { isValid: false, isWarn: true, reason: "TOO_CLOSE", landmarks: lm, label: "Move Hand Back" };
             }
 
-            // 3. Shape ratio check (Foot vs Hand rejection)
+            // 3. Shape ratio check
             const handWidth = calculateDistance(indexMcp, pinkyMcp);
             const handLength = calculateDistance(wrist, middleTip);
             const shapeRatio = handLength / (handWidth || 0.0001);
@@ -611,70 +709,27 @@
             const pinkyTip = lm[20];
             const pinkyPip = lm[18];
 
-            // Dynamic pinch threshold based on palm size
-            const handSizePx = calculateDistance(wrist, middleMcp, canvasW, canvasH);
-            const dynamicPinchThreshold = Math.max(28, handSizePx * CONFIG.pinchThresholdScale);
-
-            const isCurrentlyPinching = state.isPinchingLeft || state.isPinchingRight;
-            const currentThreshold = isCurrentlyPinching
-                ? dynamicPinchThreshold * CONFIG.pinchReleaseMultiplier
-                : dynamicPinchThreshold;
-
-            const distThumbIndex = calculateDistance(thumbTip, indexTip, canvasW, canvasH);
-            const distThumbMiddle = calculateDistance(thumbTip, middleTip, canvasW, canvasH);
-
             // Finger extension calculations (1.15 multiplier)
             const isIndexExtended = calculateDistance(indexTip, wrist, canvasW, canvasH) > calculateDistance(indexPip, wrist, canvasW, canvasH) * 1.15;
             const isMiddleExtended = calculateDistance(middleTip, wrist, canvasW, canvasH) > calculateDistance(middlePip, wrist, canvasW, canvasH) * 1.15;
             const isRingExtended = calculateDistance(ringTip, wrist, canvasW, canvasH) > calculateDistance(ringPip, wrist, canvasW, canvasH) * 1.15;
             const isPinkyExtended = calculateDistance(pinkyTip, wrist, canvasW, canvasH) > calculateDistance(pinkyPip, wrist, canvasW, canvasH) * 1.15;
 
-            // Tight fist check: all 4 fingers deeply curled toward wrist
+            // Tight fist check: all 4 fingers curled toward wrist
             const isAllFingersCurled = (!isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended);
 
-            // 1. Disambiguated Pinch Detection (Checked FIRST so fist never preempts frame 1 of a pinch)
-            const isThumbIndexPinchCandidate = distThumbIndex < currentThreshold;
-            const isThumbMiddlePinchCandidate = distThumbMiddle < currentThreshold;
+            // Stricter fist entry: tip-to-wrist distance less than own PIP-to-wrist distance
+            const isIndexStrictlyCurled = calculateDistance(indexTip, wrist, canvasW, canvasH) < calculateDistance(indexPip, wrist, canvasW, canvasH);
+            const isMiddleStrictlyCurled = calculateDistance(middleTip, wrist, canvasW, canvasH) < calculateDistance(middlePip, wrist, canvasW, canvasH);
+            const isRingStrictlyCurled = calculateDistance(ringTip, wrist, canvasW, canvasH) < calculateDistance(ringPip, wrist, canvasW, canvasH);
+            const isPinkyStrictlyCurled = calculateDistance(pinkyTip, wrist, canvasW, canvasH) < calculateDistance(pinkyPip, wrist, canvasW, canvasH);
+            const isAllFingersStrictlyCurled = (isIndexStrictlyCurled && isMiddleStrictlyCurled && isRingStrictlyCurled && isPinkyStrictlyCurled);
 
-            if (isThumbMiddlePinchCandidate || isThumbIndexPinchCandidate) {
-                if (!isCurrentlyPinching) {
-                    state.pinchConsecutiveCount = (state.pinchConsecutiveCount || 0) + 1;
-                }
-                if (isCurrentlyPinching || state.pinchConsecutiveCount >= CONFIG.pinchConsecutiveFrames) {
-                    // Decide left vs right by which distance is smaller: right if distThumbMiddle < distThumbIndex, otherwise left
-                    if (distThumbMiddle < distThumbIndex) {
-                        return {
-                            type: 'click',
-                            button: 'right',
-                            direction: null,
-                            label: 'Gesture: Right Pinch',
-                            key: 'click_right',
-                            distThumbMiddle,
-                            dynamicPinchThreshold: currentThreshold
-                        };
-                    } else {
-                        return {
-                            type: 'click',
-                            button: 'left',
-                            direction: null,
-                            label: 'Gesture: Left Pinch',
-                            key: 'click_left',
-                            distThumbIndex,
-                            dynamicPinchThreshold: currentThreshold
-                        };
-                    }
-                }
-            } else {
-                state.pinchConsecutiveCount = 0;
-            }
+            const now = performance.now();
 
-            // 2. Fist Gesture (Drag) - Only reached if neither pinch is active
-            if (isAllFingersCurled) {
-                const now = performance.now();
-                if (!state.fistStartTime) {
-                    state.fistStartTime = now;
-                }
-                if (now - state.fistStartTime >= CONFIG.fistHoldMs) {
+            if (state.isDragActive) {
+                // While dragging: stay in 'drag' as long as the fingers stay curled
+                if (isAllFingersCurled) {
                     return {
                         type: 'drag',
                         button: null,
@@ -683,32 +738,116 @@
                         key: 'drag',
                         isFist: true
                     };
+                } else {
+                    state.fistStartTime = 0;
                 }
-                // Before 150ms, keep the previous gesture
-                const prev = state.activeGesture || {
-                    type: 'move',
-                    button: null,
-                    direction: null,
-                    label: 'Gesture: Moving',
-                    key: 'move'
-                };
-                return {
-                    ...prev,
-                    isFist: true
-                };
             } else {
-                state.fistStartTime = 0;
+                // Not dragging: start the timer only while ALL FOUR fingers are strictly curled
+                if (isAllFingersStrictlyCurled) {
+                    if (!state.fistStartTime) {
+                        state.fistStartTime = now;
+                    }
+                    if (now - state.fistStartTime >= CONFIG.fistHoldMs) {
+                        return {
+                            type: 'drag',
+                            button: null,
+                            direction: null,
+                            label: 'Gesture: Dragging (Fist)',
+                            key: 'drag',
+                            isFist: true
+                        };
+                    }
+                } else {
+                    state.fistStartTime = 0;
+                }
             }
 
-            // 3. Two-Finger Scroll (Index + Middle extended, Ring + Pinky folded)
+            // Dynamic pinch threshold based on palm size
+            const handSizePx = calculateDistance(wrist, middleMcp, canvasW, canvasH);
+            const dynamicPinchThreshold = Math.max(28, handSizePx * CONFIG.pinchThresholdScale);
+            const releaseThreshold = dynamicPinchThreshold * CONFIG.pinchReleaseMultiplier;
+
+            const distThumbIndex = calculateDistance(thumbTip, indexTip, canvasW, canvasH);
+            const distThumbMiddle = calculateDistance(thumbTip, middleTip, canvasW, canvasH);
+
+            // 1. Pinch detection
+            // Once a pinch button is locked, keep it while its own thumb distance stays below the release threshold.
+            if (state.isPinchingLeft) {
+                if (distThumbIndex < releaseThreshold) {
+                    return {
+                        type: 'click',
+                        button: 'left',
+                        direction: null,
+                        label: 'Gesture: Left Pinch',
+                        key: 'click_left',
+                        distThumbIndex,
+                        dynamicPinchThreshold: releaseThreshold
+                    };
+                }
+                state.pinchConsecutiveCount = 0;
+            } else if (state.isPinchingRight) {
+                if (distThumbMiddle < releaseThreshold) {
+                    return {
+                        type: 'click',
+                        button: 'right',
+                        direction: null,
+                        label: 'Gesture: Right Pinch',
+                        key: 'click_right',
+                        distThumbMiddle,
+                        dynamicPinchThreshold: releaseThreshold
+                    };
+                }
+                state.pinchConsecutiveCount = 0;
+            } else {
+                // "Smaller distance wins" only chooses the button when a pinch starts.
+                const isThumbIndexPinchCandidate = distThumbIndex < dynamicPinchThreshold;
+                const isThumbMiddlePinchCandidate = distThumbMiddle < dynamicPinchThreshold;
+
+                if (isThumbIndexPinchCandidate || isThumbMiddlePinchCandidate) {
+                    state.pinchConsecutiveCount = (state.pinchConsecutiveCount || 0) + 1;
+                    if (state.pinchConsecutiveCount >= CONFIG.pinchConsecutiveFrames) {
+                        if (distThumbMiddle < distThumbIndex) {
+                            return {
+                                type: 'click',
+                                button: 'right',
+                                direction: null,
+                                label: 'Gesture: Right Pinch',
+                                key: 'click_right',
+                                distThumbMiddle,
+                                dynamicPinchThreshold
+                            };
+                        } else {
+                            return {
+                                type: 'click',
+                                button: 'left',
+                                direction: null,
+                                label: 'Gesture: Left Pinch',
+                                key: 'click_left',
+                                distThumbIndex,
+                                dynamicPinchThreshold
+                            };
+                        }
+                    }
+                } else {
+                    state.pinchConsecutiveCount = 0;
+                }
+            }
+
+            // 2. Two-finger scroll (index + middle extended, ring + pinky folded)
             if (isIndexExtended && isMiddleExtended && !isRingExtended && !isPinkyExtended) {
                 const midpointY = (indexTip.y + middleTip.y) / 2;
 
-                if (state.prevScrollMidpointY === null) {
-                    state.prevScrollMidpointY = midpointY;
+                if (state.smoothScrollMidpointY === null) {
+                    state.smoothScrollMidpointY = midpointY;
+                } else {
+                    state.smoothScrollMidpointY = 0.4 * midpointY + 0.6 * state.smoothScrollMidpointY;
                 }
 
-                const deltaY = midpointY - state.prevScrollMidpointY;
+                if (state.prevScrollMidpointY === null) {
+                    state.prevScrollMidpointY = state.smoothScrollMidpointY;
+                }
+
+                const deltaY = state.smoothScrollMidpointY - state.prevScrollMidpointY;
 
                 if (deltaY < -CONFIG.scrollDeltaThreshold) {
                     state.prevScrollMidpointY -= CONFIG.scrollDeltaThreshold;
@@ -742,9 +881,10 @@
                 };
             } else {
                 state.prevScrollMidpointY = null;
+                state.smoothScrollMidpointY = null;
             }
 
-            // 4. Default Cursor Move
+            // 3. Default cursor move
             return {
                 type: 'move',
                 button: null,
@@ -759,11 +899,36 @@
         // --------------------------------------------------------------------------
         let lastPinchReleaseTime = 0;
 
+        function getBufferedPointerPosition(msAgo, referenceTime = performance.now()) {
+            const targetT = referenceTime - msAgo;
+            if (!state.pointerHistory || state.pointerHistory.length === 0) {
+                return { x: state.smoothedCoords.x, y: state.smoothedCoords.y };
+            }
+            let closest = state.pointerHistory[0];
+            let minDiff = Math.abs(closest.t - targetT);
+            for (let i = 1; i < state.pointerHistory.length; i++) {
+                const diff = Math.abs(state.pointerHistory[i].t - targetT);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    closest = state.pointerHistory[i];
+                }
+            }
+            // If the nearest sample is too far from the requested time, use the current position instead
+            if (minDiff > CONFIG.pointerHistoryMaxGapMs) {
+                return { x: state.smoothedCoords.x, y: state.smoothedCoords.y };
+            }
+            return { x: closest.x, y: closest.y };
+        }
+
         function triggerNativeClickAt(x, y, button = 'left') {
+            window.dispatchEvent(new CustomEvent('gesture-click', {
+                detail: { x, y, button }
+            }));
+
             let elem = document.elementFromPoint(x, y);
             if (!elem) return;
 
-            // Target the clickable button container if text/icon was hit
+            // Target the clickable container if text/icon was hit
             const targetBtn = elem.closest('button, a, input, select, textarea') || elem;
 
             // Spawn visual ripple at click coordinates
@@ -776,13 +941,21 @@
 
             if (button === 'left') {
                 sfx.playClick(800);
+            } else if (button === 'right') {
+                sfx.playClick(1100);
+            }
+
+            if (backendActive()) {
+                return;
+            }
+
+            if (button === 'left') {
                 const mouseParams = { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window, button: 0 };
                 targetBtn.dispatchEvent(new MouseEvent('mousedown', mouseParams));
                 targetBtn.dispatchEvent(new MouseEvent('mouseup', mouseParams));
                 targetBtn.dispatchEvent(new MouseEvent('click', mouseParams));
                 if (typeof targetBtn.focus === 'function') targetBtn.focus();
             } else if (button === 'right') {
-                sfx.playClick(1100);
                 const mouseParams = { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window, button: 2, buttons: 2 };
                 targetBtn.dispatchEvent(new MouseEvent('mousedown', mouseParams));
                 targetBtn.dispatchEvent(new MouseEvent('mouseup', mouseParams));
@@ -790,25 +963,122 @@
             }
         }
 
-        function handleScrollAction(direction) {
+        function getScrollableAncestor(elem) {
+            let curr = elem;
+            while (curr && curr !== document.body && curr !== document.documentElement) {
+                const style = window.getComputedStyle(curr);
+                const overflowY = style.overflowY;
+                if ((overflowY === 'auto' || overflowY === 'scroll') && curr.scrollHeight > curr.clientHeight) {
+                    return curr;
+                }
+                curr = curr.parentElement;
+            }
+            return null;
+        }
+
+        function handleScrollAction(direction, coords) {
             if (!direction) return;
-            const amount = direction === 'up' ? -CONFIG.scrollSpeedMultiplier : CONFIG.scrollSpeedMultiplier;
-            window.scrollBy({ top: amount, behavior: 'auto' });
+            if (backendActive()) return;
+            let effectiveDirection = direction;
+            if (CONFIG.scrollInverted) {
+                effectiveDirection = direction === 'up' ? 'down' : 'up';
+            }
+            const amount = effectiveDirection === 'up' ? -CONFIG.scrollSpeedMultiplier : CONFIG.scrollSpeedMultiplier;
+
+            let target = null;
+            if (coords) {
+                const elem = document.elementFromPoint(coords.x, coords.y);
+                target = getScrollableAncestor(elem);
+            }
+
+            if (target) {
+                target.scrollBy({ top: amount, behavior: 'auto' });
+            } else {
+                window.scrollBy({ top: amount, behavior: 'auto' });
+            }
+        }
+
+        function updateHoverState(coords) {
+            const elem = document.elementFromPoint(coords.x, coords.y);
+            if (elem !== state.hoveredElement) {
+                if (state.hoveredElement) {
+                    state.hoveredElement.dispatchEvent(new MouseEvent('mouseout', {
+                        bubbles: true,
+                        cancelable: true,
+                        view: window,
+                        clientX: coords.x,
+                        clientY: coords.y,
+                        relatedTarget: elem
+                    }));
+                }
+                if (elem) {
+                    elem.dispatchEvent(new MouseEvent('mouseover', {
+                        bubbles: true,
+                        cancelable: true,
+                        view: window,
+                        clientX: coords.x,
+                        clientY: coords.y,
+                        relatedTarget: state.hoveredElement
+                    }));
+                    elem.dispatchEvent(new MouseEvent('mouseenter', {
+                        bubbles: false,
+                        cancelable: false,
+                        view: window,
+                        clientX: coords.x,
+                        clientY: coords.y,
+                        relatedTarget: state.hoveredElement
+                    }));
+                }
+                state.hoveredElement = elem;
+            }
+
+            if (!state.isDragging && elem) {
+                elem.dispatchEvent(new MouseEvent('mousemove', {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window,
+                    clientX: coords.x,
+                    clientY: coords.y,
+                    button: 0,
+                    buttons: 0
+                }));
+            }
         }
 
         /**
-         * State Machine to handle discrete clicks, hold-to-drag, and pointer events
+         * State machine for discrete clicks, hold-to-drag, and pointer events
          */
         function processGestureEvents(gesture, coords, now) {
+            if (backendActive() && state.isDragging) {
+                const target = state.dragTarget || document;
+                const releaseCoords = state.lastDragCoords || coords;
+                target.dispatchEvent(new MouseEvent('mouseup', {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window,
+                    clientX: releaseCoords.x,
+                    clientY: releaseCoords.y,
+                    button: 0,
+                    buttons: 0
+                }));
+                state.isDragging = false;
+                state.dragTarget = null;
+            }
+
+            // Hover + mousemove on every cursor update (only when the backend is not active)
+            if (!backendActive()) {
+                updateHoverState(coords);
+            }
+
             const isFist = gesture.type === 'drag' || gesture.isFist;
 
-            // A. Left Pinch Handling
+            // A. Left pinch
             if (gesture.type === 'click' && gesture.button === 'left' && !isFist) {
-                // Ignore accidental left pinch trigger if right pinch was just released
+                // Ignore accidental left pinch if a pinch was just released
                 if (now - lastPinchReleaseTime > 200 && !state.isPinchingLeft && !state.isPinchingRight) {
                     state.isPinchingLeft = true;
                     state.pinchStartTime = now;
-                    state.pinchAnchorCoords = { x: coords.x, y: coords.y };
+                    state.pinchAnchorCoords = getBufferedPointerPosition(120, now);
                 }
             } else {
                 if (state.isPinchingLeft) {
@@ -821,12 +1091,12 @@
                 }
             }
 
-            // B. Right Pinch Handling
+            // B. Right pinch
             if (gesture.type === 'click' && gesture.button === 'right' && !isFist) {
                 if (now - lastPinchReleaseTime > 200 && !state.isPinchingRight && !state.isPinchingLeft) {
                     state.isPinchingRight = true;
                     state.pinchStartTime = now;
-                    state.pinchAnchorCoords = { x: coords.x, y: coords.y };
+                    state.pinchAnchorCoords = getBufferedPointerPosition(120, now);
                 }
             } else {
                 if (state.isPinchingRight) {
@@ -839,12 +1109,57 @@
                 }
             }
 
-            // C. Scroll Execution
+            // C. Scroll
             if (gesture.type === 'scroll' && gesture.direction) {
-                handleScrollAction(gesture.direction);
+                handleScrollAction(gesture.direction, coords);
             }
 
-            // Dispatch global CustomEvent for external consumers
+            // D. Drag (only when the backend is not active)
+            if (!backendActive()) {
+                if (gesture.type === 'drag') {
+                    if (!state.isDragging) {
+                        state.isDragging = true;
+                        state.dragTarget = document.elementFromPoint(coords.x, coords.y) || document.body;
+                        state.dragTarget.dispatchEvent(new MouseEvent('mousedown', {
+                            bubbles: true,
+                            cancelable: true,
+                            view: window,
+                            clientX: coords.x,
+                            clientY: coords.y,
+                            button: 0,
+                            buttons: 1
+                        }));
+                    }
+                    document.dispatchEvent(new MouseEvent('mousemove', {
+                        bubbles: true,
+                        cancelable: true,
+                        view: window,
+                        clientX: coords.x,
+                        clientY: coords.y,
+                        button: 0,
+                        buttons: 1
+                    }));
+                } else {
+                    if (state.isDragging) {
+                        const target = state.dragTarget || document;
+                        const releaseCoords = state.lastDragCoords || coords;
+                        target.dispatchEvent(new MouseEvent('mouseup', {
+                            bubbles: true,
+                            cancelable: true,
+                            view: window,
+                            clientX: releaseCoords.x,
+                            clientY: releaseCoords.y,
+                            button: 0,
+                            buttons: 0
+                        }));
+                        state.isDragging = false;
+                        state.dragTarget = null;
+                        state.lastDragCoords = null;
+                    }
+                }
+            }
+
+            // Global CustomEvent for external consumers
             window.dispatchEvent(new CustomEvent('gesture', {
                 detail: {
                     type: gesture.type,
@@ -866,8 +1181,8 @@
             let activeX = coords.x;
             let activeY = coords.y;
 
-            // Stabilize position during initial pinch tap (< CONFIG.clickHoldThresholdMs) to prevent jitter;
-            // if held longer, follow hand smoothly for dragging.
+            // Hold the cursor on the anchor during the first part of a pinch to prevent jitter;
+            // after the tap window it follows the hand again.
             if (state.isPinchingLeft || state.isPinchingRight) {
                 const pinchDuration = now - state.pinchStartTime;
                 if (pinchDuration < CONFIG.clickHoldThresholdMs) {
@@ -907,11 +1222,11 @@
             ctx.save();
             ctx.clearRect(0, 0, canvasW, canvasH);
 
-            // Mirror canvas horizontally to align with mirrored webcam
+            // Mirror canvas horizontally to align with the mirrored webcam
             ctx.translate(canvasW, 0);
             ctx.scale(-1, 1);
 
-            // 1. Draw Skeleton Connections
+            // 1. Skeleton connections
             ctx.lineWidth = 2.5;
             ctx.strokeStyle = "rgba(0, 240, 255, 0.6)";
             ctx.lineCap = "round";
@@ -925,7 +1240,7 @@
                 ctx.stroke();
             }
 
-            // 2. Draw 21 Landmark Nodes
+            // 2. 21 landmark nodes
             for (let i = 0; i < landmarks.length; i++) {
                 const lm = landmarks[i];
                 const px = lm.x * canvasW;
@@ -937,13 +1252,13 @@
 
                 if (i === 8) {
                     radius = 8;
-                    color = "#00f0ff"; // Index Tip (Cyan)
+                    color = "#00f0ff"; // Index tip (cyan)
                 } else if (i === 4) {
                     radius = 7;
-                    color = "#ef4444"; // Thumb Tip (Red)
+                    color = "#ef4444"; // Thumb tip (red)
                 } else if (i === 12) {
                     radius = 7;
-                    color = "#a855f7"; // Middle Tip (Purple)
+                    color = "#a855f7"; // Middle tip (purple)
                 }
 
                 ctx.arc(px, py, radius, 0, 2 * Math.PI);
@@ -951,7 +1266,7 @@
                 ctx.fill();
             }
 
-            // 3. Left Pinch (Thumb + Index) Proximity Halo
+            // 3. Left pinch (thumb + index) proximity halo
             const thumbTip = landmarks[4];
             const indexTip = landmarks[8];
             const middleTip = landmarks[12];
@@ -974,7 +1289,7 @@
                 ctx.lineWidth = 2;
                 ctx.stroke();
 
-                if (distLeftPx < dynamicPinchThreshold) {
+                if (state.activeGesture && state.activeGesture.type === 'click' && state.activeGesture.button === 'left') {
                     ctx.fillStyle = "rgba(239, 68, 68, 0.85)";
                     ctx.fill();
 
@@ -985,8 +1300,8 @@
                     ctx.fillText("LEFT CLICK!", -midX - 50, midY - 18);
                     ctx.restore();
                 }
-            } 
-            // 4. Right Pinch (Thumb + Middle) Proximity Halo
+            }
+            // 4. Right pinch (thumb + middle) proximity halo
             else if (distRightPx < haloThreshold) {
                 const midX = ((thumbTip.x + middleTip.x) / 2) * canvasW;
                 const midY = ((thumbTip.y + middleTip.y) / 2) * canvasH;
@@ -997,7 +1312,7 @@
                 ctx.lineWidth = 2;
                 ctx.stroke();
 
-                if (distRightPx < dynamicPinchThreshold) {
+                if (state.activeGesture && state.activeGesture.type === 'click' && state.activeGesture.button === 'right') {
                     ctx.fillStyle = "rgba(168, 85, 247, 0.85)";
                     ctx.fill();
 
@@ -1018,30 +1333,60 @@
         // --------------------------------------------------------------------------
         let lastVideoTime = -1;
 
-        async function predictLoop() {
+        function processFrame(now) {
             const video = state.video;
             const canvas = state.canvas;
             const ctx = state.ctx;
-            const now = performance.now();
 
-            if (video.currentTime !== lastVideoTime && video.readyState >= 2) {
-                lastVideoTime = video.currentTime;
+            if (video.currentTime === lastVideoTime || video.readyState < 2) return;
+            lastVideoTime = video.currentTime;
 
-                // Detect Hand Landmarks
-                const results = state.handLandmarker.detectForVideo(video, now);
-                const validation = validateHandAndDistance(results);
+            // Detect hand landmarks
+            const results = state.handLandmarker.detectForVideo(video, now);
+            const validation = validateHandAndDistance(results);
 
-                if (validation.isValid) {
-                    state.gracePeriodFrames = 3;
-                    const landmarks = validation.landmarks;
-                    state.lastValidLandmarks = landmarks;
-                    
-                    // 1. Classify Gesture
-                    const gesture = classifyGestureRaw(landmarks, canvas.width, canvas.height);
-                    state.activeGesture = gesture;
-                    state.lastValidGesture = gesture;
+            if (validation.isValid) {
+                state.gracePeriodFrames = 3;
+                const landmarks = validation.landmarks;
+                state.lastValidLandmarks = landmarks;
 
-                    // 2. Stable Tracking pointer on Index Tip (or Midpoint of Thumb & Middle for Right Pinch)
+                // 1. Classify gesture
+                const gesture = classifyGestureRaw(landmarks, canvas.width, canvas.height);
+                state.activeGesture = gesture;
+                state.lastValidGesture = gesture;
+
+                // 2. Pointer position (midpoint for right pinch, grab point + delta for drag)
+                let smoothedCoords;
+                if (gesture.type === 'drag') {
+                    const currentLm9Screen = mapLandmarkToScreen(landmarks[9].x, landmarks[9].y);
+                    if (!state.isDragActive) {
+                        state.isDragActive = true;
+                        state.dragGrabPoint = getBufferedPointerPosition(200, state.fistStartTime);
+                        state.dragStartLm9 = { x: currentLm9Screen.x, y: currentLm9Screen.y };
+                        state.dragFilterX.reset();
+                        state.dragFilterY.reset();
+                    }
+                    const rawDragX = state.dragGrabPoint.x + (currentLm9Screen.x - state.dragStartLm9.x);
+                    const rawDragY = state.dragGrabPoint.y + (currentLm9Screen.y - state.dragStartLm9.y);
+                    const dragSmoothX = state.dragFilterX.filter(rawDragX, now);
+                    const dragSmoothY = state.dragFilterY.filter(rawDragY, now);
+                    smoothedCoords = { x: dragSmoothX, y: dragSmoothY };
+                    state.lastDragCoords = { x: smoothedCoords.x, y: smoothedCoords.y };
+                } else {
+                    if (state.isDragActive) {
+                        if (backendActive() && state.lastDragCoords) {
+                            const norm = toNorm(state.lastDragCoords.x, state.lastDragCoords.y);
+                            sendToBackend({ type: 'move', x: norm.x, y: norm.y });
+                            state.lastDragCoords = null;
+                        }
+                        state.isDragActive = false;
+                        state.dragGrabPoint = null;
+                        state.dragStartLm9 = null;
+                        state.dragFilterX.reset();
+                        state.dragFilterY.reset();
+                        state.filterX.reset();
+                        state.filterY.reset();
+                    }
                     let pointerX = landmarks[8].x;
                     let pointerY = landmarks[8].y;
                     if (gesture.type === 'click' && gesture.button === 'right') {
@@ -1051,56 +1396,109 @@
                     const rawCoords = mapLandmarkToScreen(pointerX, pointerY);
                     const smoothX = state.filterX.filter(rawCoords.x, now);
                     const smoothY = state.filterY.filter(rawCoords.y, now);
-                    const smoothedCoords = { x: smoothX, y: smoothY };
-                    state.smoothedCoords = smoothedCoords;
-                    state.lastValidSmoothedCoords = smoothedCoords;
+                    smoothedCoords = { x: smoothX, y: smoothY };
+                }
+                state.smoothedCoords = smoothedCoords;
+                state.lastValidSmoothedCoords = smoothedCoords;
 
-                    // 4. Update Status Label
-                    state.statusText.textContent = gesture.label;
+                // Keep the last ~500 ms of smoothed pointer positions
+                state.pointerHistory.push({ x: smoothedCoords.x, y: smoothedCoords.y, t: now });
+                state.pointerHistory = state.pointerHistory.filter(p => now - p.t <= CONFIG.pointerHistoryMs);
 
-                    // 5. Update Cursor & Process DOM Events
-                    updateCursorVisual(smoothedCoords, gesture, now);
-                    processGestureEvents(gesture, smoothedCoords, now);
+                // 3. Status label
+                state.statusText.textContent = `${gesture.label} | Backend: ${backendOpen() ? 'connected' : 'disconnected'} | Control: ${state.controlEnabled ? 'ON' : 'OFF'}`;
 
-                    // 6. Draw Landmarks & Visual Proximity Halo
-                    drawLandmarks(landmarks, ctx, canvas.width, canvas.height);
+                // 4. Cursor & DOM events
+                updateCursorVisual(smoothedCoords, gesture, now);
+                processGestureEvents(gesture, smoothedCoords, now);
 
-                } else if (state.gracePeriodFrames > 0 && state.lastValidLandmarks) {
-                    // Grace Period: Tolerate momentary single dropped frame (hold visual state only)
-                    state.gracePeriodFrames--;
-                    const smoothedCoords = state.lastValidSmoothedCoords;
-                    const gesture = state.lastValidGesture || state.activeGesture;
+                // 5. Landmarks & proximity halo
+                drawLandmarks(landmarks, ctx, canvas.width, canvas.height);
 
-                    updateCursorVisual(smoothedCoords, gesture, now);
-                    drawLandmarks(state.lastValidLandmarks, ctx, canvas.width, canvas.height);
+            } else if (state.gracePeriodFrames > 0 && state.lastValidLandmarks) {
+                // Grace period: tolerate a few dropped frames (visual state only)
+                state.gracePeriodFrames--;
+                const smoothedCoords = state.lastValidSmoothedCoords;
+                const gesture = state.lastValidGesture || state.activeGesture;
 
+                updateCursorVisual(smoothedCoords, gesture, now);
+                drawLandmarks(state.lastValidLandmarks, ctx, canvas.width, canvas.height);
+
+            } else {
+                // Hand lost
+                if (backendActive() && state.isDragActive && state.lastDragCoords) {
+                    const norm = toNorm(state.lastDragCoords.x, state.lastDragCoords.y);
+                    sendToBackend({ type: 'move', x: norm.x, y: norm.y });
+                    state.lastDragCoords = null;
+                }
+
+                if (validation.isWarn && validation.landmarks) {
+                    drawLandmarks(validation.landmarks, ctx, canvas.width, canvas.height);
                 } else {
-                    // Hand lost
-                    if (validation.isWarn && validation.landmarks) {
-                        drawLandmarks(validation.landmarks, ctx, canvas.width, canvas.height);
-                    } else {
-                        ctx.clearRect(0, 0, canvas.width, canvas.height);
-                    }
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                }
 
-                    state.cursorEl.style.display = "none";
-                    state.statusText.textContent = validation.label;
+                state.cursorEl.style.display = "none";
+                state.statusText.textContent = `${validation.label} | Backend: ${backendOpen() ? 'connected' : 'disconnected'} | Control: ${state.controlEnabled ? 'ON' : 'OFF'}`;
 
-                    state.filterX.reset();
-                    state.filterY.reset();
-                    state.isPinchingLeft = false;
-                    state.isPinchingRight = false;
-                    state.prevScrollMidpointY = null;
-                    state.lastValidLandmarks = null;
-                    state.fistStartTime = 0;
-                    state.pinchConsecutiveCount = 0;
+                state.filterX.reset();
+                state.filterY.reset();
+                state.isPinchingLeft = false;
+                state.isPinchingRight = false;
+                state.prevScrollMidpointY = null;
+                state.smoothScrollMidpointY = null;
+                state.lastValidLandmarks = null;
+                state.fistStartTime = 0;
+                state.pinchConsecutiveCount = 0;
+                state.isDragActive = false;
+                state.dragGrabPoint = null;
+                state.dragStartLm9 = null;
+                state.dragFilterX.reset();
+                state.dragFilterY.reset();
+                state.pointerHistory = [];   // stale positions must not be used for a click after the hand returns
+
+                // Release drag and hover if the hand disappears mid-gesture
+                if (state.isDragging) {
+                    const target = state.dragTarget || document;
+                    const coords = state.lastDragCoords || state.lastValidSmoothedCoords || { x: 0, y: 0 };
+                    target.dispatchEvent(new MouseEvent('mouseup', {
+                        bubbles: true,
+                        cancelable: true,
+                        view: window,
+                        clientX: coords.x,
+                        clientY: coords.y,
+                        button: 0,
+                        buttons: 0
+                    }));
+                    state.isDragging = false;
+                    state.dragTarget = null;
+                    state.lastDragCoords = null;
+                }
+                if (state.hoveredElement) {
+                    state.hoveredElement.dispatchEvent(new MouseEvent('mouseout', {
+                        bubbles: true,
+                        cancelable: true,
+                        view: window,
+                        clientX: 0,
+                        clientY: 0
+                    }));
+                    state.hoveredElement = null;
                 }
             }
+        }
 
+        function predictLoop() {
+            try {
+                processFrame(performance.now());
+            } catch (err) {
+                // One bad frame must not stop tracking for good
+                console.error("Frame error:", err);
+            }
             window.requestAnimationFrame(predictLoop);
         }
 
         // --------------------------------------------------------------------------
-        // 10. SETUP INTERACTIVE TEST BUTTONS
+        // 10. INTERACTIVE TEST BUTTONS
         // --------------------------------------------------------------------------
         let count = 0;
         const btnCounter = document.getElementById("btn-counter");
@@ -1135,16 +1533,189 @@
             if (e.button === 2) onRightClickTriggered(e);
         });
 
-        // Unlock Web Audio on first user interaction
-        window.addEventListener('click', () => sfx.init(), { once: true });
-        window.addEventListener('touchstart', () => sfx.init(), { once: true });
-        window.addEventListener('keydown', () => sfx.init(), { once: true });
+        // Draggable test box
+        const dragBox = document.getElementById("drag-box");
+        let isBoxDragging = false;
+        let startBoxX = 0, startBoxY = 0;
+        let currentBoxX = 0, currentBoxY = 0;
 
-        // Initialize Pipeline
+        dragBox.addEventListener("mousedown", (e) => {
+            isBoxDragging = true;
+            startBoxX = e.clientX - currentBoxX;
+            startBoxY = e.clientY - currentBoxY;
+            dragBox.style.cursor = "grabbing";
+            dragBox.style.borderColor = "var(--amber)";
+            dragBox.style.boxShadow = "0 0 20px rgba(245, 158, 11, 0.6)";
+        });
+
+        document.addEventListener("mousemove", (e) => {
+            if (!isBoxDragging) return;
+            currentBoxX = e.clientX - startBoxX;
+            currentBoxY = e.clientY - startBoxY;
+            dragBox.style.transform = `translate(${currentBoxX}px, ${currentBoxY}px)`;
+        });
+
+        document.addEventListener("mouseup", () => {
+            if (isBoxDragging) {
+                isBoxDragging = false;
+                dragBox.style.cursor = "grab";
+                dragBox.style.borderColor = "rgba(245, 158, 11, 0.6)";
+                dragBox.style.boxShadow = "none";
+            }
+        });
+
+        // Unlock Web Audio on first trusted user interaction
+        function unlockAudio(e) {
+            if (e && e.isTrusted) {
+                sfx.init();
+                window.removeEventListener('click', unlockAudio);
+                window.removeEventListener('touchstart', unlockAudio);
+                window.removeEventListener('keydown', unlockAudio);
+            }
+        }
+        window.addEventListener('click', unlockAudio);
+        window.addEventListener('touchstart', unlockAudio);
+        window.addEventListener('keydown', unlockAudio);
+
+        // --------------------------------------------------------------------------
+        // 11. WEBSOCKET CLIENT & BACKEND BRIDGE (ws://localhost:8765)
+        // --------------------------------------------------------------------------
+        window.gestureSocket = null;
+
+        function backendOpen() {
+            return !!(window.gestureSocket && window.gestureSocket.readyState === WebSocket.OPEN);
+        }
+
+        function backendActive() {
+            return backendOpen() && state.controlEnabled;
+        }
+
+        function sendToBackend(msg, force = false) {
+            if (!state.controlEnabled && !force) {
+                return;
+            }
+            if (backendOpen()) {
+                // Drop frames if the backend is falling behind, so messages don't pile up
+                if (window.gestureSocket.bufferedAmount > 65536) return;
+                window.gestureSocket.send(typeof msg === 'string' ? msg : JSON.stringify(msg));
+            }
+        }
+
+        function toNorm(x, y) {
+            const w = window.innerWidth || 1;
+            const h = window.innerHeight || 1;
+            return {
+                x: Math.max(0, Math.min(1, x / w)),
+                y: Math.max(0, Math.min(1, y / h))
+            };
+        }
+
+        window.backendOpen = backendOpen;
+        window.backendActive = backendActive;
+        window.sendToBackend = sendToBackend;
+        window.toNorm = toNorm;
+
+        // Pause switch: "g" key toggles state.controlEnabled (ignored while typing in a field)
+        window.addEventListener('keydown', (e) => {
+            const tag = (e.target && e.target.tagName) || '';
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable)) return;
+            if (e.key && e.key.toLowerCase() === 'g') {
+                state.controlEnabled = !state.controlEnabled;
+                if (!state.controlEnabled && backendOpen()) {
+                    if (state.lastValidSmoothedCoords) {
+                        const norm = toNorm(state.lastValidSmoothedCoords.x, state.lastValidSmoothedCoords.y);
+                        sendToBackend({ type: 'move', x: norm.x, y: norm.y }, true);
+                    }
+                    state.isDragging = false;
+                    state.dragTarget = null;
+                }
+            }
+        });
+
+        let wsReconnectTimer = null;
+        function scheduleReconnect() {
+            if (!wsReconnectTimer) {
+                wsReconnectTimer = setTimeout(() => {
+                    wsReconnectTimer = null;
+                    connectWebSocket();
+                }, 2000);
+            }
+        }
+
+        function connectWebSocket() {
+            if (wsReconnectTimer) {
+                clearTimeout(wsReconnectTimer);
+                wsReconnectTimer = null;
+            }
+            try {
+                const socket = new WebSocket("ws://localhost:8765");
+                window.gestureSocket = socket;
+
+                socket.onopen = () => {
+                    console.log("[WebSocket] Connected to backend on ws://localhost:8765");
+                };
+
+                socket.onclose = () => {
+                    window.gestureSocket = null;
+                    scheduleReconnect();
+                };
+
+                socket.onerror = () => {
+                    // onclose handles reconnect
+                };
+            } catch (err) {
+                scheduleReconnect();
+            }
+        }
+
+        connectWebSocket();
+
+        // Close the socket when the page goes away so the backend releases any held button
+        window.addEventListener('beforeunload', () => {
+            if (window.gestureSocket) window.gestureSocket.close();
+        });
+
+        // 'gesture' CustomEvent: move / drag / scroll
+        let lastScrollSentTime = 0;
+        window.addEventListener('gesture', (e) => {
+            const detail = e.detail;
+            if (!detail) return;
+
+            if (detail.type === 'move') {
+                if (state.fistStartTime !== 0) {
+                    return;
+                }
+                const norm = toNorm(detail.x, detail.y);
+                sendToBackend({ type: 'move', x: norm.x, y: norm.y });
+            } else if (detail.type === 'drag') {
+                const norm = toNorm(detail.x, detail.y);
+                sendToBackend({ type: 'drag', x: norm.x, y: norm.y });
+            } else if (detail.type === 'scroll' && detail.direction) {
+                const now = performance.now();
+                if (now - lastScrollSentTime >= 120) {
+                    lastScrollSentTime = now;
+                    let dir = detail.direction;
+                    if (CONFIG.scrollInverted) {
+                        dir = dir === 'up' ? 'down' : 'up';
+                    }
+                    sendToBackend({ type: 'scroll', direction: dir });
+                }
+            }
+            // 'click' is handled by 'gesture-click'
+        });
+
+        // 'gesture-click' CustomEvent: discrete clicks
+        window.addEventListener('gesture-click', (e) => {
+            const { x, y, button } = e.detail;
+            const norm = toNorm(x, y);
+            sendToBackend({ type: 'move', x: norm.x, y: norm.y });
+            sendToBackend({ type: 'click', button });
+        });
+
+        // Initialize pipeline
         initMediaPipe();
 
     </script>
 </body>
 
 </html>
-<!-- ``` -->
